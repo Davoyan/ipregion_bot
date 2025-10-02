@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY main.py .
 COPY config/ ./config/
 COPY services/ ./services/
-COPY databases/ ./databases/
+
+RUN mkdir ./databases
 
 CMD ["python", "main.py"]
