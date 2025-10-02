@@ -1,0 +1,5 @@
+aiogram
+aiohttp
+geoip2
+pycountry
+tldextract

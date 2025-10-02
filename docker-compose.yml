@@ -1,0 +1,19 @@
+services: 
+  ipregion-bot:
+    image: ipregion-bot:latest
+    build: 
+        context: . 
+        dockerfile: Dockerfile
+    container_name: ipregion-bot
+    restart: unless-stopped
+    volumes:
+      - ./databases:/app/databases
+    env_file:
+      - .env
+    networks:
+      - ipregion-bot-network
+
+networks:
+  ipregion-bot-network:
+    name: ipregion-bot-network
+    driver: bridge
