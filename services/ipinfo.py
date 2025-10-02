@@ -1,4 +1,6 @@
 import aiohttp
+import asyncio
+
 from config.variables import IPINFO_TOKEN
 
 

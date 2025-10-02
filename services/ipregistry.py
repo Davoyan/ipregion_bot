@@ -1,4 +1,6 @@
 import aiohttp
+import asyncio
+
 from config.variables import IPREGISTRY_API_TOKEN
 
 async def get_ipregistry_info(ip: str) -> dict:

@@ -1,4 +1,6 @@
 import geoip2.database
+import asyncio
+
 from config.variables import MAXMIND_DB_CITY
 from config.variables import MAXMIND_DB_ASN
 
