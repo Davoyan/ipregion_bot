@@ -1,6 +1,10 @@
 # ipregion_bot
 ipregion Telegram bot
 
+Output example:
+
+![image](https://i.imgur.com/neYbeN6.png)
+
 ## Установка
 
 1. Клонируем репозиторий:
@@ -19,3 +23,4 @@ nano .env
 ```bash
 docker compose build && docker compose up -d && docker compose logs -f
 ```
+
