@@ -487,7 +487,15 @@ def extract_hosts(text: str):
     ips += re.findall(ipv6_pattern, text)
     domains = re.findall(domain_pattern, text, flags=re.UNICODE)
 
-    return set(ips + domains)
+    all_hosts = ips + domains
+    seen = set()
+    ordered_hosts = []
+    for h in all_hosts:
+        if h not in seen:
+            seen.add(h)
+            ordered_hosts.append(h)
+
+    return ordered_hosts
 
 @dp.message()
 async def dpmessage(message: types.Message):
@@ -512,10 +520,10 @@ async def dpmessage(message: types.Message):
 
     text = re.sub(r"[,'\"!?]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-
+    
     raw_hosts = extract_hosts(text)
     hosts_map = {to_punycode(h): h for h in raw_hosts}
-    inputs = set(hosts_map.keys())
+    inputs = list(hosts_map.keys())
 
     if not inputs:
         await message.answer("❌ No IPs or domains found.")
