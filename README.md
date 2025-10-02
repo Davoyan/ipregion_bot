@@ -1,7 +1,8 @@
-# ipregion_bot
-ipregion Telegram bot
+# IPRegion Bot
+Telegram-бот для определения географического региона по IP-адресу.  
+Попробовать можно здесь: [@ipregion_bot](https://t.me/ipregion_bot).
 
-Output example:
+## Пример работы
 
 ![image](https://i.imgur.com/neYbeN6.png)
 
@@ -18,7 +19,7 @@ cd ipregion_bot
 nano .env
 ```
 
-3. Собираем Docker-обраы и запускаем контейнер:
+3. Собираем Docker-образ и запускаем контейнер:
 
 ```bash
 docker compose build && docker compose up -d && docker compose logs -f
