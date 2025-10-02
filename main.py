@@ -404,14 +404,17 @@ async def process_input(text: str) -> str | None:
         tld = ext.suffix.lower()       
 
         host_punycode = to_punycode(host)
-
+        
+        ext = tldextract.extract(host_punycode)
+        root_domain = f"{ext.domain}.{ext.suffix}"
+        
         match tld:
             case "ru" | "su" | "дети" | "tatar" | "рф":
-                whois_link = f"https://whois.tcinet.ru/#{host}"       
+                whois_link = f"https://whois.tcinet.ru/#{root_domain}"       
             case "ua":
-                whois_link = f"https://www.hostmaster.ua/whois/?_domain={host_punycode}"
+                whois_link = f"https://www.hostmaster.ua/whois/?_domain={root_domain}"
             case _:
-                whois_link = f"https://info.addr.tools/{host_punycode}"
+                whois_link = f"https://info.addr.tools/{root_domain}"
 
         texts.append(f"🔗 <b>Host:</b> {host} (<a href='{whois_link}'>Whois</a>?)")
         if ech_status:
