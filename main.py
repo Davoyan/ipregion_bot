@@ -478,7 +478,6 @@ def is_valid_target(item: str) -> bool:
 
     return False
 
-
 def extract_hosts(text: str):
     ipv4_pattern = r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"
     ipv6_pattern = r"\b(?:[A-Fa-f0-9:]+:+)+[A-Fa-f0-9]+\b"
@@ -489,7 +488,6 @@ def extract_hosts(text: str):
     domains = re.findall(domain_pattern, text, flags=re.UNICODE)
 
     return set(ips + domains)
-
 
 @dp.message()
 async def dpmessage(message: types.Message):
