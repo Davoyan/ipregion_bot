@@ -369,7 +369,12 @@ async def process_input(text: str) -> str | None:
     
     async def process_ip(ip: str):
         try:
-
+            bogon_desc = get_bogon_description(ip)
+            if bogon_desc:
+                ip_line, info_text = format_info(is_domain, host, ip, None, None, None, None, None)
+                results.append((ip, info_text, ip_line))
+                return
+                
             maxmind = await get_maxmind_info(ip)
             ipinfo = await get_ipinfo_info(ip)  
             cloudflare = await get_cloudflare_info(ip)
@@ -431,7 +436,9 @@ def is_valid_target(item: str) -> bool:
     if item.lower() == "localhost":
         return True
 
-    domain_pattern = re.compile(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$")
+    domain_pattern = re.compile(
+        r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9-]{2,63}$"
+    )
 
     parsed = urlparse(item)
     if parsed.scheme in ("http", "https") and parsed.hostname:
@@ -448,16 +455,11 @@ def is_valid_target(item: str) -> bool:
 
     item = to_punycode(item.strip())
 
-
     if item.startswith("[") and "]" in item:
         host = item[1:item.index("]")]
-
     elif ":" in item and item.count(":") == 1:
         host_part, port_part = item.rsplit(":", 1)
-        if port_part.isdigit():
-            host = host_part
-        else:
-            host = item
+        host = host_part if port_part.isdigit() else item
     else:
         host = item
 
@@ -476,6 +478,19 @@ def is_valid_target(item: str) -> bool:
 
     return False
 
+
+def extract_hosts(text: str):
+    ipv4_pattern = r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"
+    ipv6_pattern = r"\b(?:[A-Fa-f0-9:]+:+)+[A-Fa-f0-9]+\b"
+    domain_pattern = r"\b(?:[a-zA-Z0-9\u00a1-\uffff-]{1,63}\.)+[a-zA-Z\u00a1-\uffff]{2,63}\b"
+
+    ips = re.findall(ipv4_pattern, text)
+    ips += re.findall(ipv6_pattern, text)
+    domains = re.findall(domain_pattern, text, flags=re.UNICODE)
+
+    return set(ips + domains)
+
+
 @dp.message()
 async def dpmessage(message: types.Message):
     text = None
@@ -485,14 +500,11 @@ async def dpmessage(message: types.Message):
 
     elif message.document:
         doc = message.document
-
         if (doc.mime_type and doc.mime_type.startswith("text/")) or doc.file_name.endswith(TEXT_FILE_EXTENSIONS):
             file_info = await bot.get_file(doc.file_id)
             file_path = file_info.file_path
-
             downloaded = await bot.download_file(file_path)
             text = downloaded.read().decode("utf-8", errors="ignore")
-
         else:
             await message.answer("❌ This file is not in text format.")
             return
@@ -502,29 +514,35 @@ async def dpmessage(message: types.Message):
 
     text = re.sub(r"[,'\"!?]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    inputs = text.split()
+
+    raw_hosts = extract_hosts(text)
+    hosts_map = {to_punycode(h): h for h in raw_hosts}
+    inputs = set(hosts_map.keys())
+
+    if not inputs:
+        await message.answer("❌ No IPs or domains found.")
+        return
 
     found = False
     seen = set()
-    for item in inputs:
-        
-        if not is_valid_target(item):
-            continue
-        
-        try:
-            result, host = await process_input(item)
-        except Exception as e:
+    for punycode_host in inputs:
+        if not is_valid_target(punycode_host):
             continue
 
-        if result:
+        original_host = hosts_map[punycode_host]
+
+        try:
+            result, host = await process_input(original_host)
+        except Exception:
+            continue
+
+        if result and result not in seen:
             found = True
-            if result in seen:
-                continue
             seen.add(result)
             await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
 
     if not found:
-        await message.answer(f"❌ Failed to resolve IP for: {item}", parse_mode="HTML")
+        await message.answer("❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
 
 @dp.inline_query()
 async def inline_ip_lookup(query: InlineQuery):
