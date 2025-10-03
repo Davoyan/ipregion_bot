@@ -17,18 +17,17 @@ async def get_rdap_info(asn: str, session: aiohttp.ClientSession) -> dict:
     for attempt in range(1, retries + 1):
         try:
             async with session.get(url, headers=headers) as response:
-                if response.status == 429:
-                    if attempt < retries:
-                        await asyncio.sleep(delay)
-                        delay *= 2
-                        continue
-                    else:
-                        info["request_error"] = f"429 Too Many Requests (after {retries} attempts)"
+                if response.status != 200:
+                    if attempt == retries:
+                        info["request_error"] = f"HTTP {response.status} after {retries} attempts"
                         break
+                    await asyncio.sleep(delay)
+                    delay *= 3
+                    continue
 
-                response.raise_for_status()
                 data = await response.json()
                 result = data.get("result", {})
+
                 if data.get("success") and "asns" in result and result["asns"]:
                     asn_info = result["asns"][0]
                     info.update({
@@ -46,14 +45,13 @@ async def get_rdap_info(asn: str, session: aiohttp.ClientSession) -> dict:
                 break
 
         except Exception as e:
-            if attempt < retries:
-                await asyncio.sleep(delay)
-                delay *= 2
-                continue
-            info["request_error"] = str(e)
+            if attempt == retries:
+                info["request_error"] = str(e)
+                break
+            await asyncio.sleep(delay)
+            delay *= 3
 
     return info
-    
     
 '''
 async def get_rdap_info(ip: str) -> dict:
