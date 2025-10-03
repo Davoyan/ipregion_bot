@@ -3,6 +3,58 @@ import asyncio
 
 from config.variables import CLOUDFLARE_API_TOKEN
 
+async def get_rdap_info(asn: str, session: aiohttp.ClientSession) -> dict:
+    url = f"https://api.cloudflare.com/client/v4/radar/entities/asns/?asn={asn}"
+    headers = {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    retries = 3
+    delay = 1
+    info = {}
+
+    for attempt in range(1, retries + 1):
+        try:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 429:
+                    if attempt < retries:
+                        await asyncio.sleep(delay)
+                        delay *= 2
+                        continue
+                    else:
+                        info["request_error"] = f"429 Too Many Requests (after {retries} attempts)"
+                        break
+
+                response.raise_for_status()
+                data = await response.json()
+                result = data.get("result", {})
+                if data.get("success") and "asns" in result and result["asns"]:
+                    asn_info = result["asns"][0]
+                    info.update({
+                        "number": asn_info.get("asn"),
+                        "name": asn_info.get("name"),
+                        "website": asn_info.get("website"),
+                        "country": asn_info.get("country"),
+                        "country_name": asn_info.get("countryName"),
+                        "aka": asn_info.get("aka"),
+                        "org": asn_info.get("orgName"),
+                        "source": asn_info.get("source"),
+                    })
+                else:
+                    info["error"] = data.get("errors", "ASN not found")
+                break
+
+        except Exception as e:
+            if attempt < retries:
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            info["request_error"] = str(e)
+
+    return info
+    
+    
 '''
 async def get_rdap_info(ip: str) -> dict:
     info = {}
@@ -78,60 +130,3 @@ async def get_rdap_info(ip: str) -> dict:
 
     return info
 '''
-
-async def get_rdap_info(asn: str) -> dict:
-    url = f"https://api.cloudflare.com/client/v4/radar/entities/asns/?asn={asn}"
-    headers = {
-        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    timeout = aiohttp.ClientTimeout(total=5)
-
-    retries = 3
-    delay = 1
-    info = {}
-
-    for attempt in range(1, retries + 1):
-        try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url, headers=headers) as response:
-                    if response.status == 429:
-                        if attempt < retries:
-                            await asyncio.sleep(delay)
-                            delay *= 2
-                            continue
-                        else:
-                            info["request_error"] = f"429 Too Many Requests (after {retries} attempts)"
-                            break
-
-                    response.raise_for_status()
-                    data = await response.json()
-
-                    if data.get("success") and "asns" in data.get("result", {}):
-                        asns_list = data["result"]["asns"]
-                        if asns_list:
-                            asn_info = asns_list[0]
-                            info.update({
-                                "number": asn_info.get("asn"),
-                                "name": asn_info.get("name"),
-                                "website": asn_info.get("website"),
-                                "country": asn_info.get("country"),
-                                "country_name": asn_info.get("countryName"),
-                                "aka": asn_info.get("aka"),
-                                "org": asn_info.get("orgName"),
-                                "source": asn_info.get("source"),
-                            })
-                        else:
-                            info["error"] = "ASN not found in response"
-                    else:
-                        info["error"] = data.get("errors", "Unknown error")
-                    break
-
-        except Exception as e:
-            if attempt < retries:
-                await asyncio.sleep(delay)
-                delay *= 2
-                continue
-            info["request_error"] = str(e)
-
-    return info

@@ -374,20 +374,27 @@ async def process_input(text: str) -> str | None:
                 ip_line, info_text = format_info(is_domain, host, ip, None, None, None, None, None)
                 results.append((ip, info_text, ip_line))
                 return
-                
-            maxmind = await get_maxmind_info(ip)
-            ipinfo = await get_ipinfo_info(ip)  
-            cloudflare = await get_cloudflare_info(ip)
-            ipregistry = await get_ipregistry_info(ip)            
 
-            if cloudflare.get("asn_number"):
-                rdap = await get_rdap_info(cloudflare['asn_number'])
-            else:
-                rdap = {"error": "error"} 
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                maxmind, ipinfo, cloudflare, ipregistry = await asyncio.gather(
+                    get_maxmind_info(ip),
+                    get_ipinfo_info(ip, session),
+                    get_cloudflare_info(ip, session),
+                    get_ipregistry_info(ip, session)
+                )
 
-            ip_line, info_text = format_info(is_domain, host, ip, maxmind, ipinfo, rdap, cloudflare, ipregistry)
+                if cloudflare.get("asn_number"):
+                    rdap = await get_rdap_info(cloudflare["asn_number"], session)
+                else:
+                    rdap = {"error": "ASN not found"}
+
+            ip_line, info_text = format_info(
+                is_domain, host, ip, maxmind, ipinfo, rdap, cloudflare, ipregistry
+            )
             results.append((ip, info_text, ip_line))
-        except Exception:
+
+        except Exception as e:
             pass
 
     await asyncio.gather(*(process_ip(ip) for ip in valid_ips))
