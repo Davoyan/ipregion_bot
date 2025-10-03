@@ -273,73 +273,73 @@ async def resolve_host(query: str) -> tuple[str, list[str], bool, bool]:
     except ValueError:
         pass
 
-    async def doh_query(domain: str, doh_url: str, record_type: str) -> list[str]:
+    async def doh_query(session: aiohttp.ClientSession, domain: str, doh_url: str, record_type: str) -> list[str]:
         headers = {"Accept": "application/dns-json"}
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(
-                    doh_url, params={"name": domain, "type": record_type}, headers=headers
-                ) as resp:
-                    try:
-                        data = await resp.json(content_type=None)
-                    except Exception:
-                        return []
-                    answers = data.get("Answer") or data.get("answer")
-                    results = []
-                    if answers:
-                        for ans in answers:
-                            data = ans.get("data")
-                            if data:
-                                results.append(data)
-                    return results
-            except Exception:
-                return []
+        try:
+            async with session.get(
+                doh_url, params={"name": domain, "type": record_type}, headers=headers
+            ) as resp:
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    return []
+                answers = data.get("Answer") or data.get("answer")
+                results = []
+                if answers:
+                    for ans in answers:
+                        data = ans.get("data")
+                        if data:
+                            results.append(data)
+                return results
+        except Exception:
+            return []
 
     seen = set()
     to_resolve = [query]
     final_ips = []
-    
-    for doh_url in ["https://1.1.1.1/dns-query", "https://1.0.0.1/dns-query"]:
-        new_to_resolve = to_resolve.copy()
-        while new_to_resolve:
-            domain = to_punycode(str(new_to_resolve.pop(0)).strip())
-            if domain in seen:
-                continue
-            seen.add(domain)
 
-            record_types = ("A", "AAAA", "CNAME", "HTTPS")
-            results_cache = {}
+    async with aiohttp.ClientSession() as session:
+        for doh_url in ["https://1.1.1.1/dns-query", "https://1.0.0.1/dns-query"]:
+            new_to_resolve = to_resolve.copy()
+            while new_to_resolve:
+                domain = to_punycode(str(new_to_resolve.pop(0)).strip())
+                if domain in seen:
+                    continue
+                seen.add(domain)
 
-            for record_type in record_types:
-                results_cache[record_type] = await doh_query(domain, doh_url, record_type)
+                record_types = ("A", "AAAA", "CNAME", "HTTPS")
+                results_cache = {}
 
-            for record_type in ("A", "AAAA"):
-                for ip in results_cache[record_type]:
+                tasks = [doh_query(session, domain, doh_url, rt) for rt in record_types]
+                results_list = await asyncio.gather(*tasks, return_exceptions=True)
+                for rt, res in zip(record_types, results_list):
+                    results_cache[rt] = res if not isinstance(res, Exception) else []
+
+                for record_type in ("A", "AAAA"):
+                    for ip in results_cache[record_type]:
+                        try:
+                            ipaddress.ip_address(ip)
+                            if ip not in final_ips:                     
+                                final_ips.append(ip)
+                        except ValueError:
+                            continue
+
+                for cname in results_cache["CNAME"]:
+                    if cname not in seen:
+                        new_to_resolve.append(cname)          
+
+                for https_record in results_cache["HTTPS"]:
                     try:
-                        ipaddress.ip_address(ip)
-                        if ip not in final_ips:                     
-                            final_ips.append(ip)
-                    except ValueError:
-                        continue
+                        hex_data = ''.join(https_record.split()[2:])
+                        rr_bytes = bytes.fromhex(hex_data)
+                        if b'cloudflare-ech.com' in rr_bytes:
+                            ech_status = True
+                    except Exception:
+                        pass
 
-            for cname in results_cache["CNAME"]:
-                if cname not in seen:
-                    new_to_resolve.append(cname)          
-            
-            for https_record in results_cache["HTTPS"]:
-             
-                try:
-                    hex_data = ''.join(https_record.split()[2:])
-                    rr_bytes = bytes.fromhex(hex_data)
-                    match = re.search(b'cloudflare-ech.com', rr_bytes)
-                    if match:
-                        ech_status = True
-                except Exception as e:
-                    pass
+            if final_ips:
+                break
 
-        if final_ips:
-            break
-    
     return query, final_ips, bool(final_ips), ech_status
 
 def is_ip(value: str) -> bool:
