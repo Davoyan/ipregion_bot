@@ -248,12 +248,14 @@ def normalize_domain(query: str) -> str:
         return query
     except ValueError:
         pass
-        
-    try:
-        net = ipaddress.ip_network(query, strict=False)
-        return str(net.network_address)
-    except ValueError:
-        pass
+
+    if "/" in query:
+        base = query.split("/", 1)[0]
+        try:
+            ipaddress.ip_address(base)
+            return base
+        except ValueError:
+            pass
 
     if "://" not in query:
         query = "https://" + query
