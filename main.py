@@ -248,6 +248,12 @@ def normalize_domain(query: str) -> str:
         return query
     except ValueError:
         pass
+        
+    try:
+        net = ipaddress.ip_network(query, strict=False)
+        return str(net.network_address)
+    except ValueError:
+        pass
 
     if "://" not in query:
         query = "https://" + query
@@ -489,8 +495,8 @@ def is_valid_target(item: str) -> bool:
     return False
 
 def extract_hosts(text: str):
-    ipv4_pattern = r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"
-    ipv6_pattern = r"\b(?:[A-Fa-f0-9:]+:+)+[A-Fa-f0-9]+\b"
+    ipv4_pattern = r"(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?"
+    ipv6_pattern = r"(?:[A-Fa-f0-9:]+:+)+[A-Fa-f0-9]*(?:/\d{1,3})?"
     domain_pattern = r"\b(?:[a-zA-Z0-9\u00a1-\uffff-]{1,63}\.)+[a-zA-Z\u00a1-\uffff]{2,63}\b"
 
     ips = re.findall(ipv4_pattern, text)
