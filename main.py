@@ -179,8 +179,8 @@ def format_info(is_domain: bool, host: str, ip: str, maxmind: dict, ipinfo: dict
 
     
     if "error" not in radp and cloudflare_poreceed:
-        lines.append("")
         if radp.get("source"):
+            lines.append("")
             lines.append(f"○  <b>Registration ({radp['source']}):</b>")
             if radp.get("country"):
                 country_flag = get_country_flag(radp.get("country").strip())
