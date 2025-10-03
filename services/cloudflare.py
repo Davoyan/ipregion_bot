@@ -12,7 +12,7 @@ async def get_cloudflare_info(ip: str) -> dict:
     timeout = aiohttp.ClientTimeout(total=5)
 
     retries = 3
-    delay = 2
+    delay = 1
     info = {}
 
     for attempt in range(1, retries + 1):
@@ -22,6 +22,7 @@ async def get_cloudflare_info(ip: str) -> dict:
                     if response.status == 429:
                         if attempt < retries:
                             await asyncio.sleep(delay)
+                            delay *= 2
                             continue
                         else:
                             info["request_error"] = f"429 Too Many Requests (after {retries} attempts)"
@@ -49,6 +50,7 @@ async def get_cloudflare_info(ip: str) -> dict:
         except Exception as e:
             if attempt < retries:
                 await asyncio.sleep(delay)
+                delay *= 2
                 continue
             info["request_error"] = str(e)
 
