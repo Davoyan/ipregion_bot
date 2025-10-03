@@ -352,7 +352,7 @@ def is_ip(value: str) -> bool:
 async def process_input(text: str) -> str | None:
     host, ip_list, is_domain, ech_status = await resolve_host(text)
     if not ip_list:
-        return
+        return None, host
 
     valid_ips = [ip for ip in ip_list if is_ip(ip)]
     
