@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+.git
+.gitignore
+
+.env
+.env.*
+!.env.example
+
+.vscode/
+.idea/
+.DS_Store
+
+# Large local assets
+Databases/
+databases/
+*.mmdb
+
+# Tests and docs not needed for runtime
+README.md
+LICENSE

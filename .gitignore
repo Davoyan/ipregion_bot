@@ -1,0 +1,30 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs and local assets
+*.log
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Databases shipped at runtime only
+databases/*.mmdb
+
+# IDE/editor settings
+.vscode/
+.idea/
+.DS_Store
