@@ -197,7 +197,7 @@ def format_info(
     
     if merged_all:
         # --- MaxMind & IPinfo & Cloudflare ---
-        lines.append("○  <b>MaxMind & IPinfo & Cloudflare:</b>")
+        lines.append("○  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
         country_flag = get_country_flag(mm_country.strip())
         country_name = get_country_name(mm_country)
         line = f"{country_flag}{mm_country} {country_name}"
@@ -250,7 +250,7 @@ def format_info(
         if merged:
             cloudflare_proceed = True
             lines.append("")
-            lines.append("○  <b>IPinfo & Cloudflare:</b>")
+            lines.append("○  <b>IPinfo</b> & <b>Cloudflare:</b>")
             if ipi_country:
                 country_flag = get_country_flag(ipi_country.strip())
                 country_name = get_country_name(ipi_country)
