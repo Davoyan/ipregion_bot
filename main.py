@@ -213,7 +213,7 @@ def format_info(
     
     if merged_all:
         # --- MaxMind & IPinfo & Cloudflare ---
-        lines.append("○  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
+        lines.append("▢  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
 
         country_flag = get_country_flag(mm_country.strip())
         country_name = get_country_name(mm_country)
@@ -245,7 +245,7 @@ def format_info(
     else:
         # --- MaxMind ---
         if maxmind_available:
-            lines.append(f"○  <b>MaxMind:</b>")
+            lines.append(f"▢  <b>MaxMind:</b>")
             if mm_country:
                 country_flag = get_country_flag(mm_country.strip())
                 country_name = get_country_name(mm_country)
@@ -279,7 +279,7 @@ def format_info(
         if merged:
             cloudflare_proceed = True
             lines.append("")
-            lines.append("○  <b>IPinfo</b> & <b>Cloudflare:</b>")
+            lines.append("▢  <b>IPinfo</b> & <b>Cloudflare:</b>")
             
             cf_country
             
@@ -309,7 +309,7 @@ def format_info(
         # --- IPinfo ---
             if not ipi_error:
                 lines.append("")
-                lines.append(f"○  <b>IPinfo:</b>")
+                lines.append(f"▢  <b>IPinfo:</b>")
                 if ipi_country:
                     country_flag = get_country_flag(ipi_country.strip())
                     country_name = get_country_name(ipi_country)
@@ -329,7 +329,7 @@ def format_info(
             else:
                 if str(ipi_error) == "HTTP 429":
                     lines.append("")
-                    lines.append(f"○  <b>Ipinfo:</b>")
+                    lines.append(f"▢  <b>Ipinfo:</b>")
                     lines.append(f"⚠️ Ipinfo error (429)")
                 else:
                     lines.append("")
@@ -339,7 +339,7 @@ def format_info(
             if not cf_error and not cf_request_error:
                 cloudflare_proceed = True
                 lines.append("")
-                lines.append(f"○  <b>Cloudflare:</b>")
+                lines.append(f"▢  <b>Cloudflare:</b>")
                 if cf_country:
                     country_flag = get_country_flag(cf_country.strip())
                     country_name = get_country_name(cf_country)
@@ -355,7 +355,7 @@ def format_info(
             else:
                 if str(cf_request_error or cf_error) == "HTTP 429":
                     lines.append("")
-                    lines.append(f"○  <b>Cloudflare:</b>")
+                    lines.append(f"▢  <b>Cloudflare:</b>")
                     lines.append(f"⚠️ Cloudflare error (429)")
                 else:
                     lines.append("")
@@ -365,7 +365,7 @@ def format_info(
     if not radp_error and cloudflare_proceed:
         if radp_source:
             lines.append("")
-            lines.append(f"○  <b>Registration</b> ({radp_source})<b>:</b>")
+            lines.append(f"▢  <b>Registration</b> ({radp_source})<b>:</b>")
             if radp_country:
                 country_flag = get_country_flag(radp_country.strip())
                 country_name = get_country_name(radp_country)
@@ -387,7 +387,7 @@ def format_info(
     # --- ipregistry (VPN info) ---
     if "security" in ipregistry:
         lines.append("")
-        lines.append("○  <b>Privacy info</b> (ipregistry․co)<b>:</b>")
+        lines.append("▢  <b>Privacy info</b> (ipregistry․co)<b>:</b>")
 
         security = ipregistry["security"]
 
