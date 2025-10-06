@@ -401,7 +401,7 @@ def format_info(
         line = ""
 
         for i, (name, value) in enumerate(items):
-            mark = "✔️" if value else "❌"
+            mark = "✅" if value else "❌"
             sep = " / " if i < len(items) - 1 else ""
             line += f"{name}: {mark}{sep}"
 
