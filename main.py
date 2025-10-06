@@ -101,6 +101,9 @@ def similar_enough(a: str, b: str, threshold: float = 0.9) -> bool:
     a_norm = normalize(a)
     b_norm = normalize(b)
 
+    if a_norm in b_norm or b_norm in a_norm:
+        return True
+
     ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
     return ratio >= threshold
     
@@ -128,46 +131,46 @@ def format_info(
     ipnfo_link = f"https://ipinfo.io/{ip}"
     
     separator = ""
-  
-    ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>\n<a href='{bgp_link}'>BGP</a> / <a href='{censys_link}'>Censys</a> / <a href='{ipnfo_link}'>Ipinfo.io</a>"
     lines = []
+    
     bogon_desc = get_bogon_description(ip)
     if bogon_desc:
         ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>"
         lines.append(f"⚠️ <b>Private Network IP:</b> {bogon_desc}")
         if is_domain: 
-            lines.append(f"----------------")
+            lines.append(f"---------------------")
         return ip_line, "\n".join(lines) 
+       
+    # IPInfo
+    ipi_country = ipinfo.get("country")
+    ipi_region = ipinfo.get("region")
+    ipi_city = ipinfo.get("city")
+    ipi_asn_number = str(ipinfo.get("asn_number")) if ipinfo.get("asn_number") is not None else None
+    ipi_asn_org = ipinfo.get("asn_org")
+    ipi_error = ipinfo.get("error")
+    ipi_anycast = ipinfo.get("anycast")
     
     # MaxMind
     mm_country = maxmind.get("country")
     mm_region = maxmind.get("region")
     mm_city = maxmind.get("city")
-    mm_asn_number = str(maxmind.get("asn_number"))
-    if mm_asn_number:
-        mm_asn_number = f"AS{mm_asn_number}"
+    mm_asn_number = maxmind.get("asn_number")
+    if mm_asn_number is not None:
+        mm_asn_number = f"AS{mm_asn_number}" 
     mm_asn_org = maxmind.get("asn_org")
     mm_error = maxmind.get("error")
-
-    # IPinfo
-    ipi_country = ipinfo.get("country")
-    ipi_region = ipinfo.get("region")
-    ipi_city = ipinfo.get("city")
-    ipi_asn_number = str(ipinfo.get("asn_number"))
-    ipi_asn_org = ipinfo.get("asn_org")
-    ipi_error = ipinfo.get("error")
 
     # Cloudflare
     cf_country = cloudflare.get("country")
     cf_asn_number = cloudflare.get("asn_number")
-    if cf_asn_number and cf_asn_number != "0":
-        cf_asn_number = f"AS{cf_asn_number}"
-    if cf_asn_number and str(cf_asn_number) == "0":
-        cf_asn_number = None
+    if cf_asn_number is not None:
+        if str(cf_asn_number) == "0":
+            cf_asn_number = None
+        else:
+            cf_asn_number = f"AS{cf_asn_number}" 
     cf_asn_org = cloudflare.get("asn_org")
     cf_error = cloudflare.get("error")
-    cf_request_error = cloudflare.get("request_error")
-    
+    cf_request_error = cloudflare.get("request_error")    
 
     # RADP
     radp_source = radp.get("source")
@@ -178,6 +181,11 @@ def format_info(
     radp_website = radp.get("website")
     radp_error = radp.get("error")
     
+    str_anycast = ""
+    if ipi_anycast:
+        str_anycast = " is anycast 🚀"
+    
+    ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>{str_anycast}\n<a href='{bgp_link}'>BGP</a> / <a href='{censys_link}'>Censys</a> / <a href='{ipnfo_link}'>Ipinfo.io</a>"
     
     maxmind_available = not mm_error
     ipinfo_available = not ipi_error
@@ -190,53 +198,74 @@ def format_info(
             ipinfo_available,
             cloudflare_available,
             mm_country and ipi_country and cf_country and
-            mm_country.strip().lower() == ipi_country.strip().lower() == cf_country.strip().lower(),
             mm_asn_number and ipi_asn_number and cf_asn_number and
-            mm_asn_number.strip().lower() == ipi_asn_number.strip().lower() == cf_asn_number.strip().lower(),
             mm_asn_org and ipi_asn_org and cf_asn_org and
+            
+            mm_country.strip().lower() == ipi_country.strip().lower() == cf_country.strip().lower(),           
+            mm_asn_number.strip().lower() == ipi_asn_number.strip().lower() == cf_asn_number.strip().lower(),
+
             similar_enough(mm_asn_org, ipi_asn_org) and
             similar_enough(ipi_asn_org, cf_asn_org),
-            (mm_region or mm_city) and (ipi_region or ipi_city) and (
-                (mm_region and ipi_region and (mm_region.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_region.strip().lower())) or
-                (mm_city and ipi_city and (mm_city.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_city.strip().lower())) or
-                (mm_region and ipi_city and (mm_region.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_region.strip().lower())) or
-                (mm_city and ipi_region and (mm_city.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_city.strip().lower()))
+
+            (
+                (not mm_region and not mm_city) or
+                (not ipi_region and not ipi_city) or
+                ((mm_region or mm_city) and (ipi_region or ipi_city) and (
+                    (mm_region and ipi_region and (mm_region.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_region.strip().lower())) or
+                    (mm_city and ipi_city and (mm_city.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_city.strip().lower())) or
+                    (mm_region and ipi_city and (mm_region.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_region.strip().lower())) or
+                    (mm_city and ipi_region and (mm_city.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_city.strip().lower()))
+                ))
             )
         ])
     except Exception:
         merged_all = False
+
     
     cloudflare_proceed = False
     
     if merged_all:
         # --- MaxMind & IPinfo & Cloudflare ---
-        lines.append("○  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
+        lines.append("▢  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
+
         country_flag = get_country_flag(mm_country.strip())
         country_name = get_country_name(mm_country)
         line = f"{country_flag}{mm_country} {country_name}"
-        if mm_region:
-            line += f", {mm_region}"
-        if mm_city and mm_city != mm_region:
-            line += f", {mm_city}"
+
+        region = ipi_region or mm_region
+        city = ipi_city or mm_city
+
+        if region:
+            line += f", {region}"
+        if city and not similar_enough(city, region):
+            line += f", {city}"
+
         lines.append(line)
 
-        asn_line = f"{mm_asn_number}"
-        if mm_asn_org:
-            asn_line += f" / {mm_asn_org}"
+        org = None
+        if mm_asn_org or ipi_asn_org:
+            if len(mm_asn_org or "") >= len(ipi_asn_org or ""):
+                org = mm_asn_org
+            else:
+                org = ipi_asn_org
+
+        asn_line = mm_asn_number
+        if org:
+            asn_line += f" / {org}"
         lines.append(asn_line)
 
         cloudflare_proceed = True
     else:
         # --- MaxMind ---
         if maxmind_available:
-            lines.append(f"○  <b>MaxMind:</b>")
+            lines.append(f"▢  <b>MaxMind:</b>")
             if mm_country:
                 country_flag = get_country_flag(mm_country.strip())
                 country_name = get_country_name(mm_country)
                 line = f"{country_flag}{mm_country} {country_name}"
                 if mm_region:
                     line += f", {mm_region}"
-                if mm_city and mm_city != mm_region:
+                if mm_city and (not similar_enough(mm_city, mm_region)):
                     line += f", {mm_city}"
                 lines.append(line)
             else:
@@ -263,7 +292,10 @@ def format_info(
         if merged:
             cloudflare_proceed = True
             lines.append("")
-            lines.append("○  <b>IPinfo</b> & <b>Cloudflare:</b>")
+            lines.append("▢  <b>IPinfo</b> & <b>Cloudflare:</b>")
+            
+            cf_country
+            
             if ipi_country:
                 country_flag = get_country_flag(ipi_country.strip())
                 country_name = get_country_name(ipi_country)
@@ -273,16 +305,24 @@ def format_info(
                 if ipi_city and (not similar_enough(ipi_city, ipi_region)):
                     line += f", {ipi_city}"
                 lines.append(line)
+                
             if ipi_asn_number:
                 asn_line = f"{ipi_asn_number}"
-                if ipi_asn_org:
-                    asn_line += f" / {ipi_asn_org}"
+                org = None
+                if ipi_asn_org or cf_asn_org:
+                    if len(ipi_asn_org or "") >= len(cf_asn_org or ""):
+                        org = ipi_asn_org
+                    else:
+                        org = cf_asn_org
+                asn_line = f"{ipi_asn_number}"
+                if org:
+                    asn_line += f" / {org}"
                 lines.append(asn_line)
         else:
         # --- IPinfo ---
             if not ipi_error:
                 lines.append("")
-                lines.append(f"○  <b>IPinfo:</b>")
+                lines.append(f"▢  <b>IPinfo:</b>")
                 if ipi_country:
                     country_flag = get_country_flag(ipi_country.strip())
                     country_name = get_country_name(ipi_country)
@@ -302,7 +342,7 @@ def format_info(
             else:
                 if str(ipi_error) == "HTTP 429":
                     lines.append("")
-                    lines.append(f"○  <b>Ipinfo:</b>")
+                    lines.append(f"▢  <b>Ipinfo:</b>")
                     lines.append(f"⚠️ Ipinfo error (429)")
                 else:
                     lines.append("")
@@ -312,7 +352,7 @@ def format_info(
             if not cf_error and not cf_request_error:
                 cloudflare_proceed = True
                 lines.append("")
-                lines.append(f"○  <b>Cloudflare:</b>")
+                lines.append(f"▢  <b>Cloudflare:</b>")
                 if cf_country:
                     country_flag = get_country_flag(cf_country.strip())
                     country_name = get_country_name(cf_country)
@@ -328,7 +368,7 @@ def format_info(
             else:
                 if str(cf_request_error or cf_error) == "HTTP 429":
                     lines.append("")
-                    lines.append(f"○  <b>Cloudflare:</b>")
+                    lines.append(f"▢  <b>Cloudflare:</b>")
                     lines.append(f"⚠️ Cloudflare error (429)")
                 else:
                     lines.append("")
@@ -338,7 +378,7 @@ def format_info(
     if not radp_error and cloudflare_proceed:
         if radp_source:
             lines.append("")
-            lines.append(f"○  <b>Registration ({radp_source}):</b>")
+            lines.append(f"▢  <b>Registration</b> ({radp_source})<b>:</b>")
             if radp_country:
                 country_flag = get_country_flag(radp_country.strip())
                 country_name = get_country_name(radp_country)
@@ -360,14 +400,14 @@ def format_info(
     # --- ipregistry (VPN info) ---
     if "security" in ipregistry:
         lines.append("")
-        lines.append("○  <b>VPN Info (ipregistry․co):</b>")
+        lines.append("▢  <b>Privacy info</b> (ipregistry․co)<b>:</b>")
 
         security = ipregistry["security"]
 
-        checks = {
-            "Abuser": security.get("is_abuser") or security.get("is_attacker") or security.get("is_threat"),
+        checks = {           
             "Server": security.get("is_cloud_provider"),
-            "Proxy": security.get("is_proxy") or security.get("is_tor") or security.get("is_tor_exit") or security.get("is_anonymous") or security.get("is_relay") or security.get("is_vpn")    
+            "Proxy": security.get("is_proxy") or security.get("is_tor") or security.get("is_tor_exit") or security.get("is_anonymous") or security.get("is_relay") or security.get("is_vpn"),
+            "Abuser": security.get("is_abuser") or security.get("is_attacker") or security.get("is_threat")            
         }
 
         items = list(checks.items())
@@ -375,15 +415,13 @@ def format_info(
 
         for i, (name, value) in enumerate(items):
             mark = "✅" if value else "❌"
-            if i == len(items) - 1:
-                line += f"{name}: {mark}"
-            else:
-                line += f"{name}: {mark}\n"
+            sep = " / " if i < len(items) - 1 else ""
+            line += f"{name}: {mark}{sep}"
 
         lines.append(line)
 
     if is_domain:
-        lines.append(f"----------------")
+        lines.append(f"---------------------")
     
     return ip_line, "\n".join(lines)
 
