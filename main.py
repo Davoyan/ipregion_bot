@@ -97,6 +97,9 @@ def similar_enough(a: str, b: str, threshold: float = 0.9) -> bool:
     a_norm = normalize(a)
     b_norm = normalize(b)
 
+    if a_norm in b_norm or b_norm in a_norm:
+        return True
+
     ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
     return ratio >= threshold
     
@@ -182,39 +185,60 @@ def format_info(
             ipinfo_available,
             cloudflare_available,
             mm_country and ipi_country and cf_country and
-            mm_country.strip().lower() == ipi_country.strip().lower() == cf_country.strip().lower(),
             mm_asn_number and ipi_asn_number and cf_asn_number and
-            mm_asn_number.strip().lower() == ipi_asn_number.strip().lower() == cf_asn_number.strip().lower(),
             mm_asn_org and ipi_asn_org and cf_asn_org and
+            
+            mm_country.strip().lower() == ipi_country.strip().lower() == cf_country.strip().lower(),           
+            mm_asn_number.strip().lower() == ipi_asn_number.strip().lower() == cf_asn_number.strip().lower(),
+
             similar_enough(mm_asn_org, ipi_asn_org) and
             similar_enough(ipi_asn_org, cf_asn_org),
-            (mm_region or mm_city) and (ipi_region or ipi_city) and (
-                (mm_region and ipi_region and (mm_region.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_region.strip().lower())) or
-                (mm_city and ipi_city and (mm_city.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_city.strip().lower())) or
-                (mm_region and ipi_city and (mm_region.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_region.strip().lower())) or
-                (mm_city and ipi_region and (mm_city.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_city.strip().lower()))
+
+            (
+                (not mm_region and not mm_city) or
+                (not ipi_region and not ipi_city) or
+                ((mm_region or mm_city) and (ipi_region or ipi_city) and (
+                    (mm_region and ipi_region and (mm_region.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_region.strip().lower())) or
+                    (mm_city and ipi_city and (mm_city.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_city.strip().lower())) or
+                    (mm_region and ipi_city and (mm_region.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_region.strip().lower())) or
+                    (mm_city and ipi_region and (mm_city.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_city.strip().lower()))
+                ))
             )
         ])
     except Exception:
         merged_all = False
+
     
     cloudflare_proceed = False
     
     if merged_all:
         # --- MaxMind & IPinfo & Cloudflare ---
         lines.append("○  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
+
         country_flag = get_country_flag(mm_country.strip())
         country_name = get_country_name(mm_country)
         line = f"{country_flag}{mm_country} {country_name}"
-        if mm_region:
-            line += f", {mm_region}"
-        if mm_city and mm_city != mm_region:
-            line += f", {mm_city}"
+
+        region = ipi_region or mm_region
+        city = ipi_city or mm_city
+
+        if region:
+            line += f", {region}"
+        if city and not similar_enough(city, region):
+            line += f", {city}"
+
         lines.append(line)
 
-        asn_line = f"{mm_asn_number}"
-        if mm_asn_org:
-            asn_line += f" / {mm_asn_org}"
+        org = None
+        if mm_asn_org or ipi_asn_org:
+            if len(mm_asn_org or "") >= len(ipi_asn_org or ""):
+                org = mm_asn_org
+            else:
+                org = ipi_asn_org
+
+        asn_line = mm_asn_number
+        if org:
+            asn_line += f" / {org}"
         lines.append(asn_line)
 
         cloudflare_proceed = True
@@ -228,7 +252,7 @@ def format_info(
                 line = f"{country_flag}{mm_country} {country_name}"
                 if mm_region:
                     line += f", {mm_region}"
-                if mm_city and mm_city != mm_region:
+                if mm_city and (not similar_enough(mm_city, mm_region)):
                     line += f", {mm_city}"
                 lines.append(line)
             else:
@@ -256,6 +280,9 @@ def format_info(
             cloudflare_proceed = True
             lines.append("")
             lines.append("○  <b>IPinfo</b> & <b>Cloudflare:</b>")
+            
+            cf_country
+            
             if ipi_country:
                 country_flag = get_country_flag(ipi_country.strip())
                 country_name = get_country_name(ipi_country)
@@ -265,10 +292,18 @@ def format_info(
                 if ipi_city and (not similar_enough(ipi_city, ipi_region)):
                     line += f", {ipi_city}"
                 lines.append(line)
+                
             if ipi_asn_number:
                 asn_line = f"{ipi_asn_number}"
-                if ipi_asn_org:
-                    asn_line += f" / {ipi_asn_org}"
+                org = None
+                if ipi_asn_org or cf_asn_org:
+                    if len(ipi_asn_org or "") >= len(cf_asn_org or ""):
+                        org = ipi_asn_org
+                    else:
+                        org = cf_asn_org
+                asn_line = f"{ipi_asn_number}"
+                if org:
+                    asn_line += f" / {org}"
                 lines.append(asn_line)
         else:
         # --- IPinfo ---
