@@ -115,9 +115,8 @@ def format_info(
     ipnfo_link = f"https://ipinfo.io/{ip}"
     
     separator = ""
-  
-    ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>\n<a href='{bgp_link}'>BGP</a> / <a href='{censys_link}'>Censys</a> / <a href='{ipnfo_link}'>Ipinfo.io</a>"
     lines = []
+    
     bogon_desc = get_bogon_description(ip)
     if bogon_desc:
         ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>"
@@ -125,36 +124,37 @@ def format_info(
         if is_domain: 
             lines.append(f"----------------")
         return ip_line, "\n".join(lines) 
+       
+    # IPInfo
+    ipi_country = ipinfo.get("country")
+    ipi_region = ipinfo.get("region")
+    ipi_city = ipinfo.get("city")
+    ipi_asn_number = str(ipinfo.get("asn_number")) if ipinfo.get("asn_number") is not None else None
+    ipi_asn_org = ipinfo.get("asn_org")
+    ipi_error = ipinfo.get("error")
+    ipi_anycast = ipinfo.get("anycast")
     
     # MaxMind
     mm_country = maxmind.get("country")
     mm_region = maxmind.get("region")
     mm_city = maxmind.get("city")
-    mm_asn_number = str(maxmind.get("asn_number"))
-    if mm_asn_number:
-        mm_asn_number = f"AS{mm_asn_number}"
+    mm_asn_number = maxmind.get("asn_number")
+    if mm_asn_number is not None:
+        mm_asn_number = f"AS{mm_asn_number}" 
     mm_asn_org = maxmind.get("asn_org")
     mm_error = maxmind.get("error")
-
-    # IPinfo
-    ipi_country = ipinfo.get("country")
-    ipi_region = ipinfo.get("region")
-    ipi_city = ipinfo.get("city")
-    ipi_asn_number = str(ipinfo.get("asn_number"))
-    ipi_asn_org = ipinfo.get("asn_org")
-    ipi_error = ipinfo.get("error")
 
     # Cloudflare
     cf_country = cloudflare.get("country")
     cf_asn_number = cloudflare.get("asn_number")
-    if cf_asn_number and cf_asn_number != "0":
-        cf_asn_number = f"AS{cf_asn_number}"
-    if cf_asn_number and str(cf_asn_number) == "0":
-        cf_asn_number = None
+    if cf_asn_number is not None:
+        if str(cf_asn_number) == "0":
+            cf_asn_number = None
+        else:
+            cf_asn_number = f"AS{cf_asn_number}" 
     cf_asn_org = cloudflare.get("asn_org")
     cf_error = cloudflare.get("error")
-    cf_request_error = cloudflare.get("request_error")
-    
+    cf_request_error = cloudflare.get("request_error")    
 
     # RADP
     radp_source = radp.get("source")
@@ -165,6 +165,11 @@ def format_info(
     radp_website = radp.get("website")
     radp_error = radp.get("error")
     
+    str_anycast = ""
+    if ipi_anycast:
+        str_anycast = " is anycast 🚀"
+    
+    ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>{str_anycast}\n<a href='{bgp_link}'>BGP</a> / <a href='{censys_link}'>Censys</a> / <a href='{ipnfo_link}'>Ipinfo.io</a>"
     
     maxmind_available = not mm_error
     ipinfo_available = not ipi_error

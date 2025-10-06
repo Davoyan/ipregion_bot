@@ -26,6 +26,7 @@ async def get_ipinfo_info(ip: str, session: aiohttp.ClientSession) -> dict:
                     "city": data.get("city"),
                     "asn_number": asn_number,
                     "asn_org": asn_org,
+                    "anycast": data.get("anycast", False),
                 }
             else:
                 return {"error": f"HTTP {resp.status}"}
