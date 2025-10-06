@@ -125,7 +125,7 @@ def format_info(
         ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>"
         lines.append(f"⚠️ <b>Private Network IP:</b> {bogon_desc}")
         if is_domain: 
-            lines.append(f"----------------")
+            lines.append(f"---------------------")
         return ip_line, "\n".join(lines) 
        
     # IPInfo
@@ -365,7 +365,7 @@ def format_info(
     if not radp_error and cloudflare_proceed:
         if radp_source:
             lines.append("")
-            lines.append(f"○  <b>Registration ({radp_source}):</b>")
+            lines.append(f"○  <b>Registration</b> ({radp_source})<b>:</b>")
             if radp_country:
                 country_flag = get_country_flag(radp_country.strip())
                 country_name = get_country_name(radp_country)
@@ -387,30 +387,28 @@ def format_info(
     # --- ipregistry (VPN info) ---
     if "security" in ipregistry:
         lines.append("")
-        lines.append("○  <b>VPN Info (ipregistry․co):</b>")
+        lines.append("○  <b>Privacy info</b> (ipregistry․co)<b>:</b>")
 
         security = ipregistry["security"]
 
-        checks = {
-            "Abuser": security.get("is_abuser") or security.get("is_attacker") or security.get("is_threat"),
+        checks = {           
             "Server": security.get("is_cloud_provider"),
-            "Proxy": security.get("is_proxy") or security.get("is_tor") or security.get("is_tor_exit") or security.get("is_anonymous") or security.get("is_relay") or security.get("is_vpn")    
+            "Proxy": security.get("is_proxy") or security.get("is_tor") or security.get("is_tor_exit") or security.get("is_anonymous") or security.get("is_relay") or security.get("is_vpn"),
+            "Abuser": security.get("is_abuser") or security.get("is_attacker") or security.get("is_threat")            
         }
 
         items = list(checks.items())
         line = ""
 
         for i, (name, value) in enumerate(items):
-            mark = "✅" if value else "❌"
-            if i == len(items) - 1:
-                line += f"{name}: {mark}"
-            else:
-                line += f"{name}: {mark}\n"
+            mark = "✔️" if value else "❌"
+            sep = " / " if i < len(items) - 1 else ""
+            line += f"{name}: {mark}{sep}"
 
         lines.append(line)
 
     if is_domain:
-        lines.append(f"----------------")
+        lines.append(f"---------------------")
     
     return ip_line, "\n".join(lines)
 
@@ -610,7 +608,7 @@ async def process_input(text: str) -> str | None:
         texts.append(f"🔗 <b>Host:</b> {host} (<a href='{whois_link}'>Whois</a>?)")
         if ech_status:
             texts.append("🔒 Cloudflare ECH = ON")
-        texts.append("----------------")
+        texts.append("---------------------")
         
     for info_text, ip_lines in ip_groups.items():
         texts.append("\n".join(ip_lines))
