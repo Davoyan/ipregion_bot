@@ -10,7 +10,7 @@ import uuid
 import re
 import time
 import logging
-import requests
+import html
 import tldextract
 from collections import OrderedDict
 from aiogram import Bot, Dispatcher, F, types
@@ -31,12 +31,16 @@ from config.variables import MAXMIND_DB_CITY_URL
 from config.variables import MAXMIND_DB_ASN_URL
 from config.variables import MAXMIND_DB_CITY
 from config.variables import MAXMIND_DB_ASN
+from config.variables import ENABLE_SUBSCRIPTION_CHECK
+from config.variables import OUTBOUND_PROXY
 
 from services.cloudflare import get_cloudflare_info
 from services.maxmind import get_maxmind_info
 from services.ipinfo import get_ipinfo_info
 from services.rdap import get_rdap_info
 from services.ipregistry import get_ipregistry_info
+from services.proxy import extract_proxy_uris, parse_proxy_uri
+from services.subscriptions import fetch_subscription_proxies
 
 
 CHECK_INTERVAL = 60 * 60
@@ -103,6 +107,15 @@ def similar_enough(a: str, b: str, threshold: float = 0.9) -> bool:
     ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
     return ratio >= threshold
     
+
+
+SUBSCRIPTION_URL_PATTERN = re.compile(r"https?://[^\s]+")
+TRAILING_PROXY_CHARS = ')]\n\r\t,.;:\'"'
+
+
+def escape_html(value: str) -> str:
+    return html.escape(value or "", quote=True)
+
 def format_info(
     is_domain: bool,
     host: str,
@@ -589,26 +602,10 @@ async def process_input(text: str) -> str | None:
 
     texts = []
     if is_domain:
-        ext = tldextract.extract(host)
-        tld = ext.suffix.lower()       
-
-        host_punycode = to_punycode(host)
-        
-        ext = tldextract.extract(host_punycode)
-        root_domain = f"{ext.domain}.{ext.suffix}"
-        
-        match tld:
-            case "ru" | "su" | "дети" | "tatar" | "рф":
-                whois_link = f"https://whois.tcinet.ru/#{root_domain}"       
-            case "ua":
-                whois_link = f"https://www.hostmaster.ua/whois/?_domain={root_domain}"
-            case _:
-                whois_link = f"https://info.addr.tools/{root_domain}"
-
-        texts.append(f"🔗 <b>Host:</b> {host} (<a href='{whois_link}'>Whois</a>?)")
-        if ech_status:
-            texts.append("🔒 Cloudflare ECH = ON")
-        texts.append("---------------------")
+        host_lines = build_host_section_text(host, ech_status)
+        if host_lines:
+            texts.extend(host_lines)
+        texts.append("----------------")
         
     for info_text, ip_lines in ip_groups.items():
         texts.append("\n".join(ip_lines))
@@ -623,6 +620,172 @@ def to_punycode(host: str) -> str:
         return result
     except Exception:
         return host
+
+
+def build_host_section_text(host: str, ech_status: bool = False) -> list[str]:
+    lines: list[str] = []
+    if not host:
+        return lines
+
+    host = host.strip()
+    if not host:
+        return lines
+
+    if is_ip(host):
+        lines.append(f"🔗 <b>Server IP:</b> <code>{host}</code>")
+        return lines
+
+    display_host = escape_html(host)
+    host_punycode = to_punycode(host)
+    ext = tldextract.extract(host_punycode)
+    root_domain = f"{ext.domain}.{ext.suffix}" if ext.suffix else host_punycode
+    tld = ext.suffix.lower()
+
+    match tld:
+        case "ru" | "su" | "дети" | "tatar" | "рф":
+            whois_link = f"https://whois.tcinet.ru#{root_domain}"
+        case "ua":
+            whois_link = f"https://www.hostmaster.ua/whois/?_domain={root_domain}"
+        case _:
+            whois_link = f"https://info.addr.tools/{root_domain}"
+
+    lines.append(f"🔗 <b>Host:</b> {display_host} (<a href='{whois_link}'>Whois</a>?)")
+    if ech_status:
+        lines.append("🔒 Cloudflare ECH = ON")
+    return lines
+
+
+def build_proxy_section(proxy_info: dict | None, host: str) -> list[str]:
+    _ = host  # Host info rendered separately via handler
+    if not proxy_info:
+        return []
+
+    lines: list[str] = []
+    comment_raw = proxy_info.get("comment")
+    truncated = bool(proxy_info.get("comment_truncated"))
+    comment = (comment_raw or "").strip()
+    if truncated or comment:
+        if truncated:
+            lines.append(
+                "⚠️ Proxy comment was truncated due to the inline query limit in Telegram"
+            )
+        if comment:
+            display_comment = comment
+            if truncated and not display_comment.endswith("…"):
+                display_comment = f"{display_comment}…"
+            lines.append(escape_html(display_comment))
+        if lines and lines[-1] != "":
+            lines.append("")
+
+    protocol = proxy_info.get("protocol") or "proxy"
+    details: list[str] = [f"protocol={escape_html(str(protocol))}"]
+    for key in ("server", "port", "method", "type", "security", "sni", "host"):
+        val = proxy_info.get(key)
+        if val is None or val == "":
+            continue
+        details.append(f"{key}={escape_html(str(val))}")
+
+    lines.append("🔗 Proxy:")
+    for detail in details:
+        lines.append(f"<code>{detail}</code>")
+    return lines
+
+
+def extract_subscription_links(text: str) -> list[str]:
+    if not text:
+        return []
+
+    seen: set[str] = set()
+    links: list[str] = []
+    for match in SUBSCRIPTION_URL_PATTERN.finditer(text):
+        candidate = match.group(0).rstrip(TRAILING_PROXY_CHARS)
+
+        if not candidate or candidate in seen:
+            continue
+        try:
+            parsed = urlparse(candidate)
+        except Exception:
+            continue
+        if parsed.scheme not in {"http", "https"}:
+            continue
+        if not parsed.netloc:
+            continue
+        if not parsed.path or parsed.path == "/":
+            continue
+        seen.add(candidate)
+        links.append(candidate)
+    return links
+
+
+async def collect_proxy_messages(text: str) -> tuple[list[tuple[str | None, str]], list[tuple[str | None, list[tuple[str | None, str]]]]]:
+    direct_entries: list[tuple[str | None, str]] = []
+    subscription_entries: list[tuple[str | None, list[tuple[str | None, str]]]] = []
+    if not text:
+        return direct_entries, subscription_entries
+
+    def render_lines(lines: list[str]) -> str:
+        cleaned = [line for line in lines if line is not None]
+        return "\n".join(cleaned)
+
+    seen_uris: set[str] = set()
+    for uri in extract_proxy_uris(text):
+        if uri in seen_uris:
+            continue
+        seen_uris.add(uri)
+        info = parse_proxy_uri(uri)
+        host_candidate = ""
+        if isinstance(info, dict):
+            host_candidate = (info.get("server") or "")
+        if not host_candidate:
+            host_candidate = urlparse(uri).hostname or ""
+        host_candidate = host_candidate.strip()
+        lines = build_proxy_section(info, host_candidate)
+        if lines:
+            direct_entries.append((host_candidate or None, render_lines(lines)))
+
+    if not ENABLE_SUBSCRIPTION_CHECK:
+        return direct_entries, subscription_entries
+
+    seen_subscription_urls: set[str] = set()
+    for url in extract_subscription_links(text):
+        if url in seen_subscription_urls:
+            continue
+        seen_subscription_urls.add(url)
+
+        parsed_url = urlparse(url)
+        subscription_host = (parsed_url.hostname or "").strip() or None
+        entry_messages: list[tuple[str | None, str]] = []
+
+        try:
+            proxies = await fetch_subscription_proxies(url, OUTBOUND_PROXY)
+        except Exception as exc:
+            error = escape_html(str(exc))
+            entry_messages.append(
+                (None, f"⚠️ Failed to fetch subscription {escape_html(url)}: {error}")
+            )
+            subscription_entries.append((subscription_host, entry_messages))
+            continue
+
+        for uri in proxies:
+            if uri in seen_uris:
+                continue
+            seen_uris.add(uri)
+            info = parse_proxy_uri(uri)
+            host_candidate = ""
+            if isinstance(info, dict):
+                host_candidate = (info.get("server") or "")
+            if not host_candidate:
+                host_candidate = urlparse(uri).hostname or ""
+            host_candidate = host_candidate.strip()
+            section_lines = build_proxy_section(info, host_candidate)
+            if section_lines:
+                entry_messages.append((host_candidate or None, render_lines(section_lines)))
+
+        subscription_entries.append((subscription_host, entry_messages))
+
+    return direct_entries, subscription_entries
+
+
 
 def is_valid_target(item: str) -> bool:
     if item.lower() == "localhost":
@@ -710,37 +873,111 @@ async def dpmessage(message: types.Message):
     if not text:
         return
 
-    text = re.sub(r"[,'\"!?]", " ", text)
+    direct_proxy_entries, subscription_entries = await collect_proxy_messages(text)
+
+    text = re.sub("[,'\"!?]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    
+
     raw_hosts = extract_hosts(text)
     hosts_map = {to_punycode(h): h for h in raw_hosts}
     inputs = list(hosts_map.keys())
 
-    if not inputs:
-        await message.answer("❌ No IPs or domains found.")
-        return
+    host_results: dict[str, str | None] = {}
+    host_sent: set[str] = set()
+    sent_any = False
 
-    found = False
-    seen = set()
-    for punycode_host in inputs:
-        if not is_valid_target(punycode_host):
+    async def cache_host_result(host_value: str | None) -> str | None:
+        if not host_value:
+            return None
+        value = host_value.strip()
+        if not value:
+            return None
+        puny = to_punycode(value)
+        if puny not in host_results:
+            if not is_valid_target(puny):
+                host_results[puny] = None
+            else:
+                try:
+                    result, _ = await process_input(value)
+                except Exception:
+                    result = None
+                host_results[puny] = result
+        return puny
+
+    proxy_host_punys: set[str] = set()
+    for proxy_host, _ in direct_proxy_entries:
+        if proxy_host:
+            puny = to_punycode(proxy_host.strip())
+            if puny:
+                proxy_host_punys.add(puny)
+    for subscription_host, proxy_list in subscription_entries:
+        for proxy_host, _ in proxy_list:
+            if proxy_host:
+                puny = to_punycode(proxy_host.strip())
+                if puny:
+                    proxy_host_punys.add(puny)
+
+    for puny in inputs:
+        await cache_host_result(hosts_map[puny])
+
+    for puny in inputs:
+        if puny in proxy_host_punys:
             continue
-
-        original_host = hosts_map[punycode_host]
-
-        try:
-            result, host = await process_input(original_host)
-        except Exception:
-            continue
-
-        if result and result not in seen:
-            found = True
-            seen.add(result)
+        result = host_results.get(puny)
+        if result and puny not in host_sent:
             await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
+            host_sent.add(puny)
+            sent_any = True
 
-    if not found:
-        await message.answer("❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
+    for subscription_host, proxy_list in subscription_entries:
+        sub_puny = await cache_host_result(subscription_host)
+        sub_result = host_results.get(sub_puny) if sub_puny else None
+        if sub_result and sub_puny not in host_sent:
+            await message.answer(sub_result, parse_mode="HTML", disable_web_page_preview=True)
+            host_sent.add(sub_puny)
+            sent_any = True
+        for proxy_host, proxy_text in proxy_list:
+            proxy_puny = await cache_host_result(proxy_host)
+            host_text = host_results.get(proxy_puny) if proxy_puny else None
+            if host_text:
+                combined = host_text
+                if proxy_text:
+                    combined = f"{proxy_text}\n\n{host_text}"
+                await message.answer(combined, parse_mode="HTML", disable_web_page_preview=True)
+                host_sent.add(proxy_puny)
+                sent_any = True
+            elif proxy_text:
+                await message.answer(proxy_text, parse_mode="HTML", disable_web_page_preview=True)
+                sent_any = True
+
+    for proxy_host, proxy_text in direct_proxy_entries:
+        proxy_puny = await cache_host_result(proxy_host)
+        host_text = host_results.get(proxy_puny) if proxy_puny else None
+        if host_text:
+            combined = host_text
+            if proxy_text:
+                combined = f"{proxy_text}\n\n{host_text}"
+            await message.answer(combined, parse_mode="HTML", disable_web_page_preview=True)
+            host_sent.add(proxy_puny)
+            sent_any = True
+        elif proxy_text:
+            await message.answer(proxy_text, parse_mode="HTML", disable_web_page_preview=True)
+            sent_any = True
+
+    for puny, result in host_results.items():
+        if result and puny not in host_sent:
+            await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
+            host_sent.add(puny)
+            sent_any = True
+
+    if not sent_any:
+        if inputs or subscription_entries or direct_proxy_entries:
+            await message.answer("❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
+        else:
+            await message.answer("❌ No IPs or domains found.")
+
+
+
 
 @dp.inline_query()
 async def inline_ip_lookup(query: InlineQuery):
