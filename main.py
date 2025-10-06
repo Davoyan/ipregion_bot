@@ -564,7 +564,7 @@ async def process_input(text: str) -> str | None:
 
     texts = []
     if is_domain:
-        host_lines = build_host_section_text(host, ech_status=ech_status)
+        host_lines = build_host_section_text(host, ech_status)
         if host_lines:
             texts.extend(host_lines)
         texts.append("----------------")
