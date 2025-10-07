@@ -407,7 +407,7 @@ def format_info(
     radp_name = radp.get("name")
     radp_country = radp.get("country")
     radp_org = radp.get("org")
-    radp_source = radp.get("source")  
+    radp_source = radp.get("source")
 
     # --- RADP ---
     if not radp_as_error and cloudflare_proceed:
@@ -430,16 +430,18 @@ def format_info(
             
             lines.append("")
             lines.append(f"▢  <b>Registration</b> (<a href='{rdap_link_base}{ip}'>{source.upper()}</a>)<b>:</b>")                        
-    
-            if radp_country:
-                country_flag = get_country_flag(radp_country.strip())
-                country_name = get_country_name(radp_country)
-                line = f"{country_flag}{radp_country.upper()} {country_name} (IP)"
-                lines.append(line)
-            else:
-                country_flag = "🏳"
-                line = f"{country_flag} Region not specified (IP)"
-                lines.append(line)
+                       
+            radp_error = radp.get("error") 
+            if not radp_error:
+                if radp_country:
+                    country_flag = get_country_flag(radp_country.strip())
+                    country_name = get_country_name(radp_country)
+                    line = f"{country_flag}{radp_country.upper()} {country_name} (IP)"
+                    lines.append(line)
+                else:
+                    country_flag = "🏳"
+                    line = f"{country_flag} Region not specified (IP)"
+                    lines.append(line)
             
             if radp_as_country:
                 country_flag = get_country_flag(radp_as_country.strip())
