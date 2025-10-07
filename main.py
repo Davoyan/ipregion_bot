@@ -429,7 +429,7 @@ def format_info(
             rdap_link_base = RIR_RDAP_BASE.get(source.lower(), "#")
             
             lines.append("")
-            lines.append(f"▢  <b>Registration</b> (<a href='{rdap_link_base}{ip}'>{source.upper()}</a>)<b>:</b>")                        
+            lines.append(f"▢  <b>Registration</b> ({source.upper()})<b>:</b>")                        
                        
             radp_error = radp.get("error") 
             if not radp_error:
