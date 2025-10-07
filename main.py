@@ -311,9 +311,9 @@ def format_info(
         
         merged = (
             ipinfo_available and cloudflare_available and
-            ipi_country.strip().lower() == cf_country.strip().lower() and
-            ipi_asn_number.strip().lower() == cf_asn_number.strip().lower() and
-            similar_enough(ipi_asn_org, cf_asn_org)
+            (ipi_country or "").strip().lower() == (cf_country or "").strip().lower() and
+            (ipi_asn_number or "").strip().lower() == (cf_asn_number or "").strip().lower() and
+            similar_enough(ipi_asn_org or "", cf_asn_org or "")
         )
         
         # --- IPinfo AND Cloudflare ---
