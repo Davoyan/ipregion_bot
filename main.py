@@ -36,11 +36,18 @@ from services.cloudflare import get_cloudflare_info
 from services.maxmind import get_maxmind_info
 from services.ipinfo import get_ipinfo_info
 from services.rdap import get_rdap_info
+from services.rdap import get_rdap_cloudflare
 from services.ipregistry import get_ipregistry_info
 
 
 CHECK_INTERVAL = 60 * 60
 UPDATE_THRESHOLD = 24 * 60 * 60
+
+BOT_RATE_LIMIT_INTERVAL = 0.05
+CHAT_RATE_LIMIT_INTERVAL = 1.1
+_rate_limit_lock = asyncio.Lock()
+_bot_next_available = 0.0
+_chat_next_available: dict[int, float] = {}
 
 bot = Bot(token=BOT_API_TOKEN)
 dp = Dispatcher()
@@ -51,6 +58,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+async def _throttle_message(chat_id: int | None) -> None:
+    global _bot_next_available
+    while True:
+        async with _rate_limit_lock:
+            now = time.monotonic()
+            wait_until = _bot_next_available
+            if chat_id is not None:
+                wait_until = max(wait_until, _chat_next_available.get(chat_id, 0.0))
+
+            if now >= wait_until:
+                next_bot_from = _bot_next_available if _bot_next_available > now else now
+                _bot_next_available = next_bot_from + BOT_RATE_LIMIT_INTERVAL
+                if chat_id is not None:
+                    chat_prev = _chat_next_available.get(chat_id, 0.0)
+                    if chat_prev < now:
+                        chat_prev = now
+                    _chat_next_available[chat_id] = chat_prev + CHAT_RATE_LIMIT_INTERVAL
+                return
+
+            delay = wait_until - now
+
+        await asyncio.sleep(delay)
+
+
+async def answer_with_rate_limit(message: types.Message, *args, **kwargs):
+    chat_id = message.chat.id if message.chat else None
+    await _throttle_message(chat_id)
+    return await message.answer(*args, **kwargs)
+
 @dp.startup()
 async def on_startup(bot: Bot):
     global bot_id, conn
@@ -59,13 +95,10 @@ async def on_startup(bot: Bot):
     
 @dp.message(Command("start"))
 async def start(message: Message, command: Command):
-    await message.answer(
+    await answer_with_rate_limit(
+        message,
         "Hi! Send me an IPv4, IPv6, or domain name, and I’ll show you its geo information."
     )
-
-
-logger = logging.getLogger(__name__)
-
 
 def get_country_flag(iso_code: str) -> str:
     if not iso_code:
@@ -81,7 +114,7 @@ def get_bogon_description(ip: str) -> str | None:
 
 def get_country_name(country_code: str) -> str:
     return COUNTRY_MAP.get(country_code.upper(), country_code)
-
+    
 def similar_enough(a: str, b: str, threshold: float = 0.9) -> bool:
     if not a or not b:
         return False
@@ -109,6 +142,7 @@ def format_info(
     ip: str,
     maxmind: dict,
     ipinfo: dict,
+    radp_cloudflare: dict,
     radp: dict,
     cloudflare: dict,
     ipregistry: dict
@@ -125,7 +159,7 @@ def format_info(
         ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>"
         lines.append(f"⚠️ <b>Private Network IP:</b> {bogon_desc}")
         if is_domain: 
-            lines.append(f"---------------------")
+            lines.append(f"------------------------")
         return ip_line, "\n".join(lines) 
        
     # IPInfo
@@ -159,14 +193,21 @@ def format_info(
     cf_error = cloudflare.get("error")
     cf_request_error = cloudflare.get("request_error")    
 
+    # RADP_Cloudflare
+    radp_as_source = radp_cloudflare.get("source")
+    radp_as_country = radp_cloudflare.get("country")
+    radp_as_name = radp_cloudflare.get("name")
+    radp_as_aka = radp_cloudflare.get("aka")
+    radp_as_org = radp_cloudflare.get("org")
+    radp_as_website = radp_cloudflare.get("website")
+    radp_as_error = radp_cloudflare.get("error")
+    
     # RADP
-    radp_source = radp.get("source")
-    radp_country = radp.get("country")
+    radp_as = radp.get("as")
     radp_name = radp.get("name")
-    radp_aka = radp.get("aka")
+    radp_country = radp.get("country")
     radp_org = radp.get("org")
-    radp_website = radp.get("website")
-    radp_error = radp.get("error")
+    radp_source = radp.get("source")    
     
     str_anycast = ""
     if ipi_anycast:
@@ -361,33 +402,69 @@ def format_info(
                     lines.append("")
                     lines.append(f"⚠️ Cloudflare error")
 
+    # RADP
+    radp_as = radp.get("as")
+    radp_name = radp.get("name")
+    radp_country = radp.get("country")
+    radp_org = radp.get("org")
+    radp_source = radp.get("source")  
+
     # --- RADP ---
-    if not radp_error and cloudflare_proceed:
-        if radp_source:
+    if not radp_as_error and cloudflare_proceed:
+        if radp_as_source:
+            
+            if radp_source:
+                source = str(radp_source)
+            else:
+                source = str(radp_as_source)
+                
+            RIR_RDAP_BASE = {
+                "arin": "https://rdap.arin.net/registry/ip/",
+                "ripe": "https://rdap.db.ripe.net/ip/",
+                "apnic": "https://rdap.apnic.net/ip/",
+                "lacnic": "https://rdap.lacnic.net/rdap/ip/",
+                "afrinic": "https://rdap.afrinic.net/rdap/ip/",
+            }
+            
+            rdap_link_base = RIR_RDAP_BASE.get(source.lower(), "#")
+            
             lines.append("")
-            lines.append(f"▢  <b>Registration</b> ({radp_source})<b>:</b>")
+            lines.append(f"▢  <b>Registration</b> (<a href='{rdap_link_base}{ip}'>{source.upper()}</a>)<b>:</b>")                        
+    
             if radp_country:
                 country_flag = get_country_flag(radp_country.strip())
                 country_name = get_country_name(radp_country)
-                line = f"{country_flag}{radp_country.upper()} {country_name}"
+                line = f"{country_flag}{radp_country.upper()} {country_name} (IP)"
                 lines.append(line)
             else:
                 country_flag = "🏳"
-                line = f"{country_flag} Region not specified"
+                line = f"{country_flag} Region not specified (IP)"
                 lines.append(line)
-            if radp_name:
-                if radp_website and radp_website.lower() != 'none':
-                    name_line = f"<a href='{radp_website.strip()}'>{radp_name.strip()}</a>"
+            
+            if radp_as_country:
+                country_flag = get_country_flag(radp_as_country.strip())
+                country_name = get_country_name(radp_as_country)
+                line = f"{country_flag}{radp_as_country.upper()} {country_name} (AS)"
+                lines.append(line)
+            else:
+                country_flag = "🏳"
+                line = f"{country_flag} Region not specified (AS)"
+                lines.append(line)
+                
+            if radp_as_name:
+                if radp_as_website and radp_as_website.lower() != 'none':
+                    name_line = f"<a href='{radp_as_website.strip()}'>{radp_as_name.strip()}</a>"
                 else:
-                    name_line = f"{radp_name.strip()}"
-                if radp_aka:
-                    name_line += f" / {radp_aka}"
+                    name_line = f"{radp_as_name.strip()}"
+                if radp_as_aka:
+                    name_line += f" / {radp_as_aka}"
+                    
                 lines.append(name_line)
 
     # --- ipregistry (VPN info) ---
     if "security" in ipregistry:
         lines.append("")
-        lines.append("▢  <b>Privacy info</b> (ipregistry․co)<b>:</b>")
+        lines.append("▢  <b>Privacy info</b> (ipregistry<b>․</b>co)<b>:</b>")
 
         security = ipregistry["security"]
 
@@ -408,7 +485,7 @@ def format_info(
         lines.append(line)
 
     if is_domain:
-        lines.append(f"---------------------")
+        lines.append(f"------------------------")
     
     return ip_line, "\n".join(lines)
 
@@ -441,6 +518,27 @@ def normalize_domain(query: str) -> str:
         return "127.0.0.1"
 
     return host
+
+async def _doh_query(session: aiohttp.ClientSession, domain: str, doh_url: str, record_type: str) -> list[str]:
+    headers = {"Accept": "application/dns-json"}
+    try:
+        async with session.get(
+            doh_url, params={"name": domain, "type": record_type}, headers=headers
+        ) as resp:
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                return []
+            answers = data.get("Answer") or data.get("answer")
+            results = []
+            if answers:
+                for ans in answers:
+                    data = ans.get("data")
+                    if data:
+                        results.append(data)
+            return results
+    except Exception:
+        return []
     
 async def resolve_host(query: str) -> tuple[str, list[str], bool, bool]:
     query = normalize_domain(query)
@@ -454,27 +552,6 @@ async def resolve_host(query: str) -> tuple[str, list[str], bool, bool]:
         return query, [query], False, False
     except ValueError:
         pass
-
-    async def doh_query(session: aiohttp.ClientSession, domain: str, doh_url: str, record_type: str) -> list[str]:
-        headers = {"Accept": "application/dns-json"}
-        try:
-            async with session.get(
-                doh_url, params={"name": domain, "type": record_type}, headers=headers
-            ) as resp:
-                try:
-                    data = await resp.json(content_type=None)
-                except Exception:
-                    return []
-                answers = data.get("Answer") or data.get("answer")
-                results = []
-                if answers:
-                    for ans in answers:
-                        data = ans.get("data")
-                        if data:
-                            results.append(data)
-                return results
-        except Exception:
-            return []
 
     seen = set()
     to_resolve = [query]
@@ -492,7 +569,7 @@ async def resolve_host(query: str) -> tuple[str, list[str], bool, bool]:
                 record_types = ("A", "AAAA", "CNAME", "HTTPS")
                 results_cache = {}
 
-                tasks = [doh_query(session, domain, doh_url, rt) for rt in record_types]
+                tasks = [_doh_query(session, domain, doh_url, rt) for rt in record_types]
                 results_list = await asyncio.gather(*tasks, return_exceptions=True)
                 for rt, res in zip(record_types, results_list):
                     results_cache[rt] = res if not isinstance(res, Exception) else []
@@ -531,6 +608,36 @@ def is_ip(value: str) -> bool:
     except ValueError:
         return False
 
+async def _process_ip(ip: str, session: aiohttp.ClientSession, is_domain: bool, host: str, results: list):
+    try:
+        bogon_desc = get_bogon_description(ip)
+        if bogon_desc:
+            ip_line, info_text = format_info(is_domain, host, ip, None, None, None, None, None, None)
+            results.append((ip, info_text, ip_line))
+            return
+
+        maxmind, ipinfo, cloudflare, ipregistry, radp = await asyncio.gather(
+            get_maxmind_info(ip),
+            get_ipinfo_info(ip, session),
+            get_cloudflare_info(ip, session),
+            get_ipregistry_info(ip, session),
+            get_rdap_info(ip, session)
+        )
+
+        asn_number = cloudflare.get("asn_number")
+        if asn_number:
+            rdap_cloudflare = await get_rdap_cloudflare(asn_number, session)
+        else:
+            rdap_cloudflare = {"error": "ASN not found"}
+
+        ip_line, info_text = format_info(
+            is_domain, host, ip, maxmind, ipinfo, rdap_cloudflare, radp, cloudflare, ipregistry
+        )
+        results.append((ip, info_text, ip_line))
+
+    except Exception as e:
+        logger.info(f"Error processing {ip}: {e}")
+
 async def process_input(text: str) -> str | None:
     host, ip_list, is_domain, ech_status = await resolve_host(text)
     if not ip_list:
@@ -549,37 +656,8 @@ async def process_input(text: str) -> str | None:
 
     results: list[tuple[str, str, str]] = []
     
-    async def process_ip(ip: str):
-        try:
-            bogon_desc = get_bogon_description(ip)
-            if bogon_desc:
-                ip_line, info_text = format_info(is_domain, host, ip, None, None, None, None, None)
-                results.append((ip, info_text, ip_line))
-                return
-
-            timeout = aiohttp.ClientTimeout(total=15)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                maxmind, ipinfo, cloudflare, ipregistry = await asyncio.gather(
-                    get_maxmind_info(ip),
-                    get_ipinfo_info(ip, session),
-                    get_cloudflare_info(ip, session),
-                    get_ipregistry_info(ip, session)
-                )
-
-                if cloudflare.get("asn_number"):
-                    rdap = await get_rdap_info(cloudflare["asn_number"], session)
-                else:
-                    rdap = {"error": "ASN not found"}
-
-            ip_line, info_text = format_info(
-                is_domain, host, ip, maxmind, ipinfo, rdap, cloudflare, ipregistry
-            )
-            results.append((ip, info_text, ip_line))
-
-        except Exception as e:
-            pass
-
-    await asyncio.gather(*(process_ip(ip) for ip in valid_ips))
+    async with aiohttp.ClientSession() as session:
+        await asyncio.gather(*(_process_ip(ip, session, is_domain, host, results) for ip in valid_ips))
 
     results.sort(key=lambda x: (sort_ip(x[0])[0], x[1], sort_ip(x[0])[1]))
 
@@ -608,7 +686,7 @@ async def process_input(text: str) -> str | None:
         texts.append(f"🔗 <b>Host:</b> {host} (<a href='{whois_link}'>Whois</a>?)")
         if ech_status:
             texts.append("🔒 Cloudflare ECH = ON")
-        texts.append("---------------------")
+        texts.append("------------------------")
         
     for info_text, ip_lines in ip_groups.items():
         texts.append("\n".join(ip_lines))
@@ -704,7 +782,7 @@ async def dpmessage(message: types.Message):
             downloaded = await bot.download_file(file_path)
             text = downloaded.read().decode("utf-8", errors="ignore")
         else:
-            await message.answer("❌ This file is not in text format.")
+            await answer_with_rate_limit(message, "❌ This file is not in text format.")
             return
 
     if not text:
@@ -718,7 +796,7 @@ async def dpmessage(message: types.Message):
     inputs = list(hosts_map.keys())
 
     if not inputs:
-        await message.answer("❌ No IPs or domains found.")
+        await answer_with_rate_limit(message, "❌ No IPs or domains found.")
         return
 
     found = False
@@ -737,10 +815,10 @@ async def dpmessage(message: types.Message):
         if result and result not in seen:
             found = True
             seen.add(result)
-            await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
+            await answer_with_rate_limit(message, result, parse_mode="HTML", disable_web_page_preview=True)
 
     if not found:
-        await message.answer("❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
+        await answer_with_rate_limit(message, "❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
 
 @dp.inline_query()
 async def inline_ip_lookup(query: InlineQuery):
@@ -793,7 +871,7 @@ async def check_and_update(session, file_path, url):
                     f.write(chunk)
         logger.info(f"Geofile {file_path} updated successfully.")
     except Exception as e:
-        logger.error(f"Error while updating geofile {file_path}: {e}")
+        logger.info(f"Error while updating geofile {file_path}: {e}")
 
 async def polling_task():
     await dp.start_polling(bot)

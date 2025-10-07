@@ -1,16 +1,62 @@
 import aiohttp
 import asyncio
+import json
+
+from ipwhois import IPWhois
+from ipwhois.exceptions import IPDefinedError
 
 from config.variables import CLOUDFLARE_API_TOKEN
 
-async def get_rdap_info(asn: str, session: aiohttp.ClientSession) -> dict:
+RIR_RDAP_BASE = {
+    "arin": "https://rdap.arin.net/registry/ip/",
+    "ripe": "https://rdap.db.ripe.net/ip/",
+    "apnic": "https://rdap.apnic.net/ip/",
+    "lacnic": "https://rdap.lacnic.net/rdap/ip/",
+    "afrinic": "https://rdap.afrinic.net/rdap/ip/",
+}
+
+async def get_rdap_info(ip: str, session: aiohttp.ClientSession) -> dict:
+    info = {}
+
+    try:
+        res = await asyncio.to_thread(IPWhois(ip).lookup_rdap)
+
+        network = res.get('network', {})
+        asn_number = res.get('asn')
+        asn_org = res.get('asn_description')
+        registry = res.get("asn_registry")    
+        country = network.get('country')        
+        
+        registry = (registry or "").lower()
+        if registry == "ripencc":
+            registry = "ripe"
+        elif not registry or registry == "unknown":
+            registry = None
+        
+        info.update({
+            "as": asn_number,
+            "name": asn_org,
+            "country": country,
+            "org": asn_org,
+            "source": registry,
+        })
+
+    except IPDefinedError as e:
+        info["error"] = "IP is private/reserved"
+    except Exception as e:
+        info["request_error"] = str(e)
+
+    return info
+
+
+async def get_rdap_cloudflare(asn: str, session: aiohttp.ClientSession) -> dict:
     url = f"https://api.cloudflare.com/client/v4/radar/entities/asns/?asn={asn}"
     headers = {
         "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
         "Content-Type": "application/json"
     }
 
-    retries = 3
+    retries = 4
     delay = 1
     info = {}
 

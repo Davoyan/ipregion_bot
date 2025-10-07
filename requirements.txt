@@ -3,3 +3,4 @@ aiohttp
 geoip2
 pycountry
 tldextract
+ipwhois

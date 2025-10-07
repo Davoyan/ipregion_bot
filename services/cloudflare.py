@@ -10,7 +10,7 @@ async def get_cloudflare_info(ip: str, session: aiohttp.ClientSession) -> dict:
         "Content-Type": "application/json"
     }
 
-    retries = 3
+    retries = 4
     delay = 1
     info = {}
 
