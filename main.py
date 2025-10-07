@@ -49,6 +49,42 @@ UPDATE_THRESHOLD = 24 * 60 * 60
 bot = Bot(token=BOT_API_TOKEN)
 dp = Dispatcher()
 
+BOT_RATE_LIMIT_INTERVAL = 0.05
+CHAT_RATE_LIMIT_INTERVAL = 1.1
+_rate_limit_lock = asyncio.Lock()
+_bot_next_available = 0.0
+_chat_next_available: dict[int, float] = {}
+
+
+async def _throttle_message(chat_id: int | None) -> None:
+    global _bot_next_available
+    while True:
+        async with _rate_limit_lock:
+            now = time.monotonic()
+            wait_until = _bot_next_available
+            if chat_id is not None:
+                wait_until = max(wait_until, _chat_next_available.get(chat_id, 0.0))
+
+            if now >= wait_until:
+                next_bot_from = _bot_next_available if _bot_next_available > now else now
+                _bot_next_available = next_bot_from + BOT_RATE_LIMIT_INTERVAL
+                if chat_id is not None:
+                    chat_prev = _chat_next_available.get(chat_id, 0.0)
+                    if chat_prev < now:
+                        chat_prev = now
+                    _chat_next_available[chat_id] = chat_prev + CHAT_RATE_LIMIT_INTERVAL
+                return
+
+            delay = wait_until - now
+
+        await asyncio.sleep(delay)
+
+
+async def answer_with_rate_limit(message: types.Message, *args, **kwargs):
+    chat_id = message.chat.id if message.chat else None
+    await _throttle_message(chat_id)
+    return await message.answer(*args, **kwargs)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
@@ -63,7 +99,8 @@ async def on_startup(bot: Bot):
     
 @dp.message(Command("start"))
 async def start(message: Message, command: Command):
-    await message.answer(
+    await answer_with_rate_limit(
+        message,
         "Hi! Send me an IPv4, IPv6, or domain name, and I’ll show you its geo information."
     )
 
@@ -867,7 +904,7 @@ async def dpmessage(message: types.Message):
             downloaded = await bot.download_file(file_path)
             text = downloaded.read().decode("utf-8", errors="ignore")
         else:
-            await message.answer("❌ This file is not in text format.")
+            await answer_with_rate_limit(message, "❌ This file is not in text format.")
             return
 
     if not text:
@@ -925,7 +962,7 @@ async def dpmessage(message: types.Message):
             continue
         result = host_results.get(puny)
         if result and puny not in host_sent:
-            await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
+            await answer_with_rate_limit(message, result, parse_mode="HTML", disable_web_page_preview=True)
             host_sent.add(puny)
             sent_any = True
 
@@ -933,7 +970,7 @@ async def dpmessage(message: types.Message):
         sub_puny = await cache_host_result(subscription_host)
         sub_result = host_results.get(sub_puny) if sub_puny else None
         if sub_result and sub_puny not in host_sent:
-            await message.answer(sub_result, parse_mode="HTML", disable_web_page_preview=True)
+            await answer_with_rate_limit(message, sub_result, parse_mode="HTML", disable_web_page_preview=True)
             host_sent.add(sub_puny)
             sent_any = True
         for proxy_host, proxy_text in proxy_list:
@@ -943,11 +980,11 @@ async def dpmessage(message: types.Message):
                 combined = host_text
                 if proxy_text:
                     combined = f"{proxy_text}\n\n{host_text}"
-                await message.answer(combined, parse_mode="HTML", disable_web_page_preview=True)
+                await answer_with_rate_limit(message, combined, parse_mode="HTML", disable_web_page_preview=True)
                 host_sent.add(proxy_puny)
                 sent_any = True
             elif proxy_text:
-                await message.answer(proxy_text, parse_mode="HTML", disable_web_page_preview=True)
+                await answer_with_rate_limit(message, proxy_text, parse_mode="HTML", disable_web_page_preview=True)
                 sent_any = True
 
     for proxy_host, proxy_text in direct_proxy_entries:
@@ -957,24 +994,24 @@ async def dpmessage(message: types.Message):
             combined = host_text
             if proxy_text:
                 combined = f"{proxy_text}\n\n{host_text}"
-            await message.answer(combined, parse_mode="HTML", disable_web_page_preview=True)
+            await answer_with_rate_limit(message, combined, parse_mode="HTML", disable_web_page_preview=True)
             host_sent.add(proxy_puny)
             sent_any = True
         elif proxy_text:
-            await message.answer(proxy_text, parse_mode="HTML", disable_web_page_preview=True)
+            await answer_with_rate_limit(message, proxy_text, parse_mode="HTML", disable_web_page_preview=True)
             sent_any = True
 
     for puny, result in host_results.items():
         if result and puny not in host_sent:
-            await message.answer(result, parse_mode="HTML", disable_web_page_preview=True)
+            await answer_with_rate_limit(message, result, parse_mode="HTML", disable_web_page_preview=True)
             host_sent.add(puny)
             sent_any = True
 
     if not sent_any:
         if inputs or subscription_entries or direct_proxy_entries:
-            await message.answer("❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
+            await answer_with_rate_limit(message, "❌ Failed to resolve any IPs/domains.", parse_mode="HTML")
         else:
-            await message.answer("❌ No IPs or domains found.")
+            await answer_with_rate_limit(message, "❌ No IPs or domains found.")
 
 
 
