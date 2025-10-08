@@ -213,7 +213,6 @@ def format_info(
     
     bgp_link = f"https://bgp.tools/prefix-selector?ip={ip}"
     
-    #https://bgp.tools/prefix/185.121.168.0/24#
     if radp_cidr:
         cidr_ip, cidr_mask = radp_cidr.split('/')
         bgp_link = f"https://bgp.tools/prefix/{cidr_ip}/{cidr_mask}"

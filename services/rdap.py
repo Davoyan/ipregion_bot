@@ -65,7 +65,7 @@ async def get_rdap_cloudflare(asn: str, session: aiohttp.ClientSession) -> dict:
             async with session.get(url, headers=headers) as response:
                 if response.status != 200:
                     if attempt == retries:
-                        info["request_error"] = f"HTTP {response.status} after {retries} attempts"
+                        info["error"] = f"HTTP {response.status} after {retries} attempts"
                         break
                     await asyncio.sleep(delay)
                     delay *= 3
@@ -92,7 +92,7 @@ async def get_rdap_cloudflare(asn: str, session: aiohttp.ClientSession) -> dict:
 
         except Exception as e:
             if attempt == retries:
-                info["request_error"] = str(e)
+                info["error"] = str(e)
                 break
             await asyncio.sleep(delay)
             delay *= 3

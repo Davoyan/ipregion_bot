@@ -19,7 +19,7 @@ async def get_cloudflare_info(ip: str, session: aiohttp.ClientSession) -> dict:
             async with session.get(url, headers=headers) as response:
                 if response.status != 200:
                     if attempt == retries:
-                        info["request_error"] = f"HTTP {response.status} after {retries} attempts"
+                        info["error"] = f"HTTP {response.status} after {retries} attempts"
                         break
                     await asyncio.sleep(delay)
                     delay *= 3
@@ -30,12 +30,17 @@ async def get_cloudflare_info(ip: str, session: aiohttp.ClientSession) -> dict:
 
                 if data.get("success") and "ip" in result:
                     ip_info = result["ip"]
+                    asn_number = ip_info.get("asn")
+                    
+                    if asn_number == "0":
+                        asn_number = None
+                    
                     info.update({
                         "ip": ip_info.get("ip"),
                         "ip_version": ip_info.get("ipVersion"),
                         "country": ip_info.get("location"),
                         "country_name": ip_info.get("locationName"),
-                        "asn_number": ip_info.get("asn"),
+                        "asn_number": asn_number,
                         "asn_name": ip_info.get("asnName"),
                         "asn_org": ip_info.get("asnOrgName"),
                         "asn_location": ip_info.get("asnLocation"),
@@ -46,7 +51,7 @@ async def get_cloudflare_info(ip: str, session: aiohttp.ClientSession) -> dict:
 
         except Exception as e:
             if attempt == retries:
-                info["request_error"] = str(e)
+                info["error"] = str(e)
                 break
             await asyncio.sleep(delay)
             delay *= 3
