@@ -180,7 +180,7 @@ def format_info(
         mm_asn_number = f"AS{mm_asn_number}" 
     mm_asn_org = maxmind.get("asn_org")
     mm_error = maxmind.get("error")
-
+    
     # Cloudflare
     cf_country = cloudflare.get("country")
     cf_asn_number = cloudflare.get("asn_number")
@@ -248,12 +248,12 @@ def format_info(
         ])
     except Exception:
         merged_all = False
-
-    
+   
     cloudflare_proceed = False
     
     if merged_all:
         # --- MaxMind & IPinfo & Cloudflare ---
+        lines.append("")
         lines.append("▢  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
 
         country_flag = get_country_flag(mm_country.strip())
@@ -286,6 +286,7 @@ def format_info(
     else:
         # --- MaxMind ---
         if maxmind_available:
+            lines.append("")
             lines.append(f"▢  <b>MaxMind:</b>")
             if mm_country:
                 country_flag = get_country_flag(mm_country.strip())
@@ -304,10 +305,7 @@ def format_info(
                 asn_line = f"{mm_asn_number}"
                 if mm_asn_org:
                     asn_line += f" / {mm_asn_org}"
-                lines.append(asn_line)
-        else:
-            lines.append("")
-            lines.append(f"⚠️ MaxMind error")  
+                lines.append(asn_line)  
         
         merged = (
             ipinfo_available and cloudflare_available and
@@ -610,8 +608,43 @@ def is_ip(value: str) -> bool:
     except ValueError:
         return False
 
+class TTLCache:
+    def __init__(self, max_size=2000, ttl=21600):
+        self.cache = OrderedDict()
+        self.max_size = max_size
+        self.ttl = ttl
+        self.lock = asyncio.Lock()
+
+    async def get(self, key):
+        async with self.lock:
+            item = self.cache.get(key)
+            if not item:
+                return None
+            value, timestamp = item
+            if time.time() - timestamp > self.ttl:
+                del self.cache[key]
+                return None
+            self.cache.move_to_end(key)
+            return value
+
+    async def set(self, key, value):
+        async with self.lock:
+            if key in self.cache:
+                self.cache.move_to_end(key)
+            self.cache[key] = (value, time.time())
+            if len(self.cache) > self.max_size:
+                self.cache.popitem(last=False)
+
+ip_cache = TTLCache(max_size=2000, ttl=21600)
+asn_cache = TTLCache(max_size=1000, ttl=21600)
+
 async def _process_ip(ip: str, session: aiohttp.ClientSession, is_domain: bool, host: str, results: list):
     try:
+        cached_ip = await ip_cache.get(ip)
+        if cached_ip:
+            results.append(cached_ip)
+            return
+            
         bogon_desc = get_bogon_description(ip)
         if bogon_desc:
             ip_line, info_text = format_info(is_domain, host, ip, None, None, None, None, None, None)
@@ -625,20 +658,32 @@ async def _process_ip(ip: str, session: aiohttp.ClientSession, is_domain: bool, 
             get_ipregistry_info(ip, session),
             get_rdap_info(ip, session)
         )
-
+            
         asn_number = cloudflare.get("asn_number")
         if asn_number:
-            rdap_cloudflare = await get_rdap_cloudflare(asn_number, session)
+            cached_asn = await asn_cache.get(asn_number)
+            if cached_asn:
+                rdap_cloudflare = cached_asn
+            else:
+                rdap_cloudflare = await get_rdap_cloudflare(asn_number, session)
+                if "error" not in rdap_cloudflare:
+                    await asn_cache.set(asn_number, rdap_cloudflare)
         else:
             rdap_cloudflare = {"error": "ASN not found"}
 
         ip_line, info_text = format_info(
             is_domain, host, ip, maxmind, ipinfo, rdap_cloudflare, radp, cloudflare, ipregistry
         )
-        results.append((ip, info_text, ip_line))
+        
+        result_tuple = (ip, info_text, ip_line)
+        
+        if all(isinstance(d, dict) and "error" not in d for d in [maxmind, ipinfo, cloudflare, ipregistry, radp, rdap_cloudflare]):
+            await ip_cache.set(ip, result_tuple)
+          
+        results.append(result_tuple)
 
-    except Exception as e:
-        logger.info(f"Error processing {ip}: {e}")
+    except Exception:
+        pass
 
 async def process_input(text: str) -> str | None:
     host, ip_list, is_domain, ech_status = await resolve_host(text)
@@ -692,7 +737,6 @@ async def process_input(text: str) -> str | None:
         
     for info_text, ip_lines in ip_groups.items():
         texts.append("\n".join(ip_lines))
-        texts.append("")
         texts.append(info_text)
 
     return "\n".join(texts), host
