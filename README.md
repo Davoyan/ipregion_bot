@@ -1,25 +1,26 @@
-# IPRegion Bot
-Telegram-бот для определения географического региона по IP-адресу.  
-Попробовать можно здесь: [@ipregion_bot](https://t.me/ipregion_bot).
+# 🌍 IPRegion Bot
 
-## Пример работы
+A simple Telegram bot that detects the geographic region of any given IP address.
 
-![image](https://i.imgur.com/neYbeN6.png)
+Try it out here: [@ipregion_bot](https://t.me/ipregion_bot).
 
-## Установка
+## 🧩 Output example
 
-1. Клонируем репозиторий:
+![image](https://i.imgur.com/50ys6ga.png)
+
+## 🚀 Installation
+
+1. Clone the repository:
 ```bash
 git clone https://github.com/Davoyan/ipregion_bot.git
-cd ipregion_bot
 ```
-2. Заполняем свои токены в .env:
+2. Add your tokens to the .env file:
 
 ```bash
-nano .env
+cd ipregion_bot && nano .env
 ```
 
-3. Собираем Docker-образ и запускаем контейнер:
+3. Build the Docker image and start the container:
 
 ```bash
 docker compose build && docker compose up -d && docker compose logs -f
