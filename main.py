@@ -147,9 +147,6 @@ def format_info(
     cloudflare: dict,
     ipregistry: dict
 ) -> tuple[str, str]:
-    bgp_link = f"https://bgp.tools/prefix-selector?ip={ip}"
-    censys_link = f"https://search.censys.io/hosts/{ip}"
-    ipnfo_link = f"https://ipinfo.io/{ip}"
     
     separator = ""
     lines = []
@@ -180,7 +177,7 @@ def format_info(
         mm_asn_number = f"AS{mm_asn_number}" 
     mm_asn_org = maxmind.get("asn_org")
     mm_error = maxmind.get("error")
-    
+
     # Cloudflare
     cf_country = cloudflare.get("country")
     cf_asn_number = cloudflare.get("asn_number")
@@ -205,6 +202,7 @@ def format_info(
     # RADP
     radp_as = radp.get("as")
     radp_name = radp.get("name")
+    radp_cidr = radp.get("cidr")
     radp_country = radp.get("country")
     radp_org = radp.get("org")
     radp_source = radp.get("source")    
@@ -212,6 +210,16 @@ def format_info(
     str_anycast = ""
     if ipi_anycast:
         str_anycast = " is anycast 🚀"
+    
+    bgp_link = f"https://bgp.tools/prefix-selector?ip={ip}"
+    
+    #https://bgp.tools/prefix/185.121.168.0/24#
+    if radp_cidr:
+        cidr_ip, cidr_mask = radp_cidr.split('/')
+        bgp_link = f"https://bgp.tools/prefix/{cidr_ip}/{cidr_mask}"
+    
+    censys_link = f"https://search.censys.io/hosts/{ip}"
+    ipnfo_link = f"https://ipinfo.io/{ip}"
     
     ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>{str_anycast}\n<a href='{bgp_link}'>BGP</a> / <a href='{censys_link}'>Censys</a> / <a href='{ipnfo_link}'>Ipinfo.io</a>"
     

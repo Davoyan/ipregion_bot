@@ -23,6 +23,7 @@ async def get_rdap_info(ip: str, session: aiohttp.ClientSession) -> dict:
 
         network = res.get('network', {})
         asn_number = res.get('asn')
+        asn_cird = res.get('asn_cidr')
         asn_org = res.get('asn_description')
         registry = res.get("asn_registry")    
         country = network.get('country')        
@@ -36,15 +37,14 @@ async def get_rdap_info(ip: str, session: aiohttp.ClientSession) -> dict:
         info.update({
             "as": asn_number,
             "name": asn_org,
+            "cidr": asn_cird,
             "country": country,
             "org": asn_org,
             "source": registry,
         })
 
-    except IPDefinedError as e:
-        info["error"] = "IP is private/reserved"
     except Exception as e:
-        info["request_error"] = str(e)
+        info["error"] = str(e)
 
     return info
 
