@@ -213,9 +213,12 @@ def format_info(
     
     bgp_link = f"https://bgp.tools/prefix-selector?ip={ip}"
     
-    if radp_cidr:
-        cidr_ip, cidr_mask = radp_cidr.split('/')
-        bgp_link = f"https://bgp.tools/prefix/{cidr_ip}/{cidr_mask}"
+    try:
+        if radp_cidr:
+            cidr_ip, cidr_mask = radp_cidr.split('/')
+            bgp_link = f"https://bgp.tools/prefix/{cidr_ip}/{cidr_mask}"
+    except Exception:
+        pass
     
     censys_link = f"https://search.censys.io/hosts/{ip}"
     ipnfo_link = f"https://ipinfo.io/{ip}"
