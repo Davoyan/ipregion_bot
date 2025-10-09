@@ -31,6 +31,8 @@ from config.variables import MAXMIND_DB_CITY_URL
 from config.variables import MAXMIND_DB_ASN_URL
 from config.variables import MAXMIND_DB_CITY
 from config.variables import MAXMIND_DB_ASN
+from config.variables import IPQS_WHITELIST
+from config.variables import IPQS_WHITELIST_USERS
 
 from services.cloudflare import get_cloudflare_info
 from services.maxmind import get_maxmind_info
@@ -38,7 +40,7 @@ from services.ipinfo import get_ipinfo_info
 from services.rdap import get_rdap_info
 from services.rdap import get_rdap_cloudflare
 from services.ipregistry import get_ipregistry_info
-
+from services.ipqs import get_ipqs
 
 CHECK_INTERVAL = 60 * 60
 UPDATE_THRESHOLD = 24 * 60 * 60
@@ -140,12 +142,13 @@ def format_info(
     is_domain: bool,
     host: str,
     ip: str,
-    maxmind: dict,
-    ipinfo: dict,
-    radp_cloudflare: dict,
-    radp: dict,
-    cloudflare: dict,
-    ipregistry: dict
+    maxmind: dict | None = None,
+    ipinfo: dict | None = None,
+    radp_cloudflare: dict | None = None,
+    radp: dict | None = None,
+    cloudflare: dict | None = None,
+    ipregistry: dict | None = None,
+    ipqs: dict | None = None
 ) -> tuple[str, str]:
     
     separator = ""
@@ -213,14 +216,18 @@ def format_info(
     
     bgp_link = f"https://bgp.tools/prefix-selector?ip={ip}"
     
-    if radp_cidr:
-        cidr_ip, cidr_mask = radp_cidr.split('/')
-        bgp_link = f"https://bgp.tools/prefix/{cidr_ip}/{cidr_mask}"
+    try:
+        if radp_cidr:
+            cidr_ip, cidr_mask = radp_cidr.split('/')
+            bgp_link = f"https://bgp.tools/prefix/{cidr_ip}/{cidr_mask}"
+    except Exception:
+        pass
     
     censys_link = f"https://search.censys.io/hosts/{ip}"
     ipnfo_link = f"https://ipinfo.io/{ip}"
+    ipqs_link = f"https://www.ipqualityscore.com/free-ip-lookup-proxy-vpn-test/lookup/{ip}"
     
-    ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>{str_anycast}\n<a href='{bgp_link}'>BGP</a> / <a href='{censys_link}'>Censys</a> / <a href='{ipnfo_link}'>Ipinfo.io</a>"
+    ip_line = f"{separator}<b>IP:</b> <code>{ip}</code>{str_anycast}\n<a href='{bgp_link}'>BGP</a> | <a href='{censys_link}'>Censys</a> | <a href='{ipnfo_link}'>Ipinfo.io</a> | <a href='{ipqs_link}'>IPQS</a>"
     
     maxmind_available = not mm_error
     ipinfo_available = not ipi_error
@@ -467,18 +474,19 @@ def format_info(
                     name_line += f" / {radp_as_aka}"
                     
                 lines.append(name_line)
-
-    # --- ipregistry (VPN info) ---
+    
+    ipregistry_proceeded = False    
     if "security" in ipregistry:
+        ipregistry_proceeded = True
         lines.append("")
         lines.append("▢  <b>Privacy info</b> (ipregistry<b>․</b>co)<b>:</b>")
 
         security = ipregistry["security"]
 
         checks = {           
-            "Server": security.get("is_cloud_provider"),
             "Proxy": security.get("is_proxy") or security.get("is_tor") or security.get("is_tor_exit") or security.get("is_anonymous") or security.get("is_relay") or security.get("is_vpn"),
-            "Abuser": security.get("is_abuser") or security.get("is_attacker") or security.get("is_threat")            
+            "Abuser": security.get("is_abuser") or security.get("is_attacker") or security.get("is_threat"),
+            "Server": security.get("is_cloud_provider")
         }
 
         items = list(checks.items())
@@ -490,6 +498,43 @@ def format_info(
             line += f"{name}: {mark}{sep}"
 
         lines.append(line)
+        
+    if ipqs and "error" not in ipqs:
+        lines.append("")
+        lines.append("▢  <b>Privacy info</b> (IPQS)<b>:</b>")                
+            
+        checks = {
+            "Proxy": ipqs.get("vpn") or ipqs.get("active_vpn") or ipqs.get("tor") or ipqs.get("active_tor") or ipqs.get("proxy"),
+            "Abuser": ipqs.get("recent_abuse") or ipqs.get("is_crawler") or ipqs.get("bot_status")
+        }
+        
+        items = list(checks.items())
+        line = ""
+
+        for i, (name, value) in enumerate(items):
+            mark = "✅" if value else "❌"
+            sep = " / " if i < len(items) - 1 else ""
+            line += f"{name}: {mark}{sep}"
+        lines.append(line)
+        
+        mark = ""
+        desc = ""
+        fraud_score = ipqs.get("fraud_score")
+        if fraud_score is not None:
+            if 0 <= fraud_score <= 20:
+                mark = "🟢"
+                desc = "Safe"
+            elif 21 <= fraud_score <= 50:
+                mark = "🟡"
+                desc = "Moderate risk"
+            elif 51 <= fraud_score <= 75:
+                mark = "🟠"
+                desc = "High risk"
+            else:
+                mark = "🔴"
+                desc = "Fraud"
+
+            lines.append(f"Fraud score: <b>{fraud_score}</b> - {mark} {desc}")
 
     if is_domain:
         lines.append(f"------------------------")
@@ -641,31 +686,106 @@ class TTLCache:
             self.cache[key] = (value, time.time())
             if len(self.cache) > self.max_size:
                 self.cache.popitem(last=False)
+                
+    async def delete(self, key):
+        async with self.lock:
+            if key in self.cache:
+                del self.cache[key]
 
-ip_cache = TTLCache(max_size=2000, ttl=21600)
-asn_cache = TTLCache(max_size=1000, ttl=21600)
+asn_cache = TTLCache(max_size=5000, ttl=43200)
+maxmind_cache = TTLCache(max_size=5000, ttl=43200)
+ipinfo_cache = TTLCache(max_size=5000, ttl=43200)
+cloudflare_cache = TTLCache(max_size=5000, ttl=43200)
+ipregistry_cache = TTLCache(max_size=5000, ttl=43200)
+rdap_cache = TTLCache(max_size=5000, ttl=43200) # 12 hours
 
-async def _process_ip(ip: str, session: aiohttp.ClientSession, is_domain: bool, host: str, results: list):
+ipqs_cache = TTLCache(max_size=10000, ttl=14*24*60*60) # 2 weeks
+
+async def cached_get_maxmind_info(ip):
+    cached = await maxmind_cache.get(ip)
+    if cached:
+        return cached
+    data = await get_maxmind_info(ip)
+    if isinstance(data, dict) and "error" not in data:
+        await maxmind_cache.set(ip, data)
+    return data
+
+async def cached_get_ipinfo_info(ip, session):
+    cached = await ipinfo_cache.get(ip)
+    if cached:
+        return cached
+    data = await get_ipinfo_info(ip, session)
+    if isinstance(data, dict) and "error" not in data:
+        await ipinfo_cache.set(ip, data)
+    return data
+
+async def cached_get_cloudflare_info(ip, session):
+    cached = await cloudflare_cache.get(ip)
+    if cached:
+        return cached
+    data = await get_cloudflare_info(ip, session)
+    if isinstance(data, dict) and "error" not in data:
+        await cloudflare_cache.set(ip, data)
+    return data
+
+async def cached_get_ipregistry_info(ip, session):
+    cached = await ipregistry_cache.get(ip)
+    if cached:
+        return cached
+    data = await get_ipregistry_info(ip, session)
+    if isinstance(data, dict) and "error" not in data:
+        await ipregistry_cache.set(ip, data)
+    return data
+
+async def cached_get_rdap_info(ip, session):
+    cached = await rdap_cache.get(ip)
+    if cached:
+        return cached
+    data = await get_rdap_info(ip, session)
+    if isinstance(data, dict) and "error" not in data:
+        await rdap_cache.set(ip, data)
+    return data
+
+async def cached_get_ipqs_info(ip, session):
+    cached = await ipqs_cache.get(ip)
+    if cached:
+        return cached
+    data = await get_ipqs(ip, session)
+    if isinstance(data, dict) and "error" not in data:
+        await ipqs_cache.set(ip, data)
+    return data
+
+async def _process_ip(
+    ip: str,
+    session: aiohttp.ClientSession,
+    is_domain: bool,
+    host: str,
+    results: list,
+    user_id: int | None = None
+):
     try:
-        cached_ip = await ip_cache.get(ip)
-        if cached_ip:
-            results.append(cached_ip)
-            return
-            
+        ipqs_whitelist_user = False
+        if IPQS_WHITELIST and user_id in IPQS_WHITELIST_USERS:
+            ipqs_whitelist_user = True          
+
         bogon_desc = get_bogon_description(ip)
         if bogon_desc:
-            ip_line, info_text = format_info(is_domain, host, ip, None, None, None, None, None, None)
+            ip_line, info_text = format_info(is_domain, host, ip)
             results.append((ip, info_text, ip_line))
             return
 
-        maxmind, ipinfo, cloudflare, ipregistry, radp = await asyncio.gather(
-            get_maxmind_info(ip),
-            get_ipinfo_info(ip, session),
-            get_cloudflare_info(ip, session),
-            get_ipregistry_info(ip, session),
-            get_rdap_info(ip, session)
-        )
+        ipqs = None
+        if ipqs_whitelist_user:
+            ipqs = await cached_get_ipqs_info(ip, session)
             
+        maxmind, ipinfo, cloudflare, ipregistry, radp = await asyncio.gather(
+            cached_get_maxmind_info(ip),
+            cached_get_ipinfo_info(ip, session),
+            cached_get_cloudflare_info(ip, session),
+            cached_get_ipregistry_info(ip, session),
+            cached_get_rdap_info(ip, session)
+        )
+
         asn_number = cloudflare.get("asn_number")
         if asn_number:
             cached_asn = await asn_cache.get(asn_number)
@@ -679,20 +799,26 @@ async def _process_ip(ip: str, session: aiohttp.ClientSession, is_domain: bool, 
             rdap_cloudflare = {"error": "ASN not found"}
 
         ip_line, info_text = format_info(
-            is_domain, host, ip, maxmind, ipinfo, rdap_cloudflare, radp, cloudflare, ipregistry
+            is_domain=is_domain,
+            host=host,
+            ip=ip,
+            maxmind=maxmind,
+            ipinfo=ipinfo,
+            radp_cloudflare=rdap_cloudflare,
+            radp=radp,
+            cloudflare=cloudflare,
+            ipregistry=ipregistry,
+            ipqs=ipqs
         )
-        
+
         result_tuple = (ip, info_text, ip_line)
-        
-        if all(isinstance(d, dict) and "error" not in d for d in [maxmind, ipinfo, cloudflare, ipregistry, radp, rdap_cloudflare]):
-            await ip_cache.set(ip, result_tuple)
-          
+
         results.append(result_tuple)
 
     except Exception:
         pass
 
-async def process_input(text: str) -> str | None:
+async def process_input(text: str, user_id: int | None = None) -> str | None:
     host, ip_list, is_domain, ech_status = await resolve_host(text)
     if not ip_list:
         return None, host
@@ -711,7 +837,10 @@ async def process_input(text: str) -> str | None:
     results: list[tuple[str, str, str]] = []
     
     async with aiohttp.ClientSession() as session:
-        await asyncio.gather(*(_process_ip(ip, session, is_domain, host, results) for ip in valid_ips))
+        await asyncio.gather(*(
+            _process_ip(ip, session, is_domain, host, results, user_id=user_id)
+            for ip in valid_ips
+        ))
 
     results.sort(key=lambda x: (sort_ip(x[0])[0], x[1], sort_ip(x[0])[1]))
 
@@ -861,7 +990,7 @@ async def dpmessage(message: types.Message):
         original_host = hosts_map[punycode_host]
 
         try:
-            result, host = await process_input(original_host)
+            result, host = await process_input(original_host, user_id=message.from_user.id)
         except Exception:
             continue
 
@@ -879,7 +1008,7 @@ async def inline_ip_lookup(query: InlineQuery):
     if not text:
         return
 
-    result_text, host = await process_input(text)
+    result_text, host = await process_input(text, user_id=query.from_user.id)
     if not result_text:
         content = InputTextMessageContent(message_text=f"❌ Failed to resolve IP for: {text}")
     else:
