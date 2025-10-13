@@ -450,10 +450,10 @@ def format_info(
                     country_name = get_country_name(radp_country)
                     line = f"{country_flag}{radp_country.upper()} {country_name} (IP)"
                     lines.append(line)
-                else:
-                    country_flag = "🏳"
-                    line = f"{country_flag} Region not specified (IP)"
-                    lines.append(line)
+                #else:
+                #    country_flag = "🏳"
+                #    line = f"{country_flag} Region not specified (IP)"
+                #    lines.append(line)
             
             if radp_as_country:
                 country_flag = get_country_flag(radp_as_country.strip())
