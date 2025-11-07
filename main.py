@@ -889,7 +889,7 @@ def is_valid_target(item: str) -> bool:
         return True
 
     domain_pattern = re.compile(
-        r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9-]{2,63}$"
+        r"^(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+[a-zA-Z0-9_-]{2,63}$"
     )
 
     parsed = urlparse(item)
@@ -933,7 +933,7 @@ def is_valid_target(item: str) -> bool:
 def extract_hosts(text: str):
     ipv4_pattern = r"(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?"
     ipv6_pattern = r"(?:[A-Fa-f0-9:]+:+)+[A-Fa-f0-9]*(?:/\d{1,3})?"
-    domain_pattern = r"\b(?:[a-zA-Z0-9\u00a1-\uffff-]{1,63}\.)+[a-zA-Z\u00a1-\uffff]{2,63}\b"
+    domain_pattern = r"\b(?:[a-zA-Z0-9_\u00a1-\uffff-]{1,63}\.)+[a-zA-Z\u00a1-\uffff]{2,63}\b"
 
     ips = re.findall(ipv4_pattern, text)
     ips += re.findall(ipv6_pattern, text)
