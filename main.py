@@ -223,7 +223,7 @@ def format_info(
     except Exception:
         pass
     
-    censys_link = f"https://search.censys.io/hosts/{ip}"
+    censys_link = f"https://platform.censys.io/hosts/{ip}"
     ipnfo_link = f"https://ipinfo.io/{ip}"
     ipqs_link = f"https://www.ipqualityscore.com/free-ip-lookup-proxy-vpn-test/lookup/{ip}"
     
