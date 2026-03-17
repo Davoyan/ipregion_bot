@@ -21,23 +21,25 @@ async def get_rdap_info(ip: str, session: aiohttp.ClientSession) -> dict:
     try:
         res = await asyncio.to_thread(IPWhois(ip).lookup_rdap)
 
-        network = res.get('network', {})
-        asn_number = res.get('asn')
-        asn_cird = res.get('asn_cidr')
-        asn_org = res.get('asn_description')
-        registry = res.get("asn_registry")    
-        country = network.get('country')        
-        
+        network = res.get("network", {}) or {}
+        asn_number = res.get("asn")
+        asn_cidr = res.get("asn_cidr")
+        asn_org = res.get("asn_description")
+        registry = res.get("asn_registry")
+        country = network.get("country")
+        network_name = network.get("name")
+
         registry = (registry or "").lower()
         if registry == "ripencc":
             registry = "ripe"
         elif not registry or registry == "unknown":
             registry = None
-        
+
         info.update({
             "as": asn_number,
             "name": asn_org,
-            "cidr": asn_cird,
+            "network_name": network_name,
+            "cidr": asn_cidr,
             "country": country,
             "org": asn_org,
             "source": registry,
