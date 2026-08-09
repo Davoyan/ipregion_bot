@@ -19,7 +19,7 @@ async def get_rdap_info(ip: str, session: aiohttp.ClientSession) -> dict:
     info = {}
 
     try:
-        res = await asyncio.to_thread(IPWhois(ip).lookup_rdap)
+        res = await asyncio.to_thread(lambda: IPWhois(ip).lookup_rdap(inc_nir=False))
 
         network = res.get("network", {}) or {}
         asn_number = res.get("asn")

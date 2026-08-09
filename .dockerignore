@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Secrets and local config (passed via env_file at runtime, not baked into the image)
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Runtime data (mounted as a volume)
+databases/
+*.mmdb
+
+# Meta and docs
+README.md
+LICENSE
+docker-compose.yml
+.dockerignore
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

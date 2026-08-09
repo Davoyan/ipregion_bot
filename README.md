@@ -14,10 +14,10 @@ Try it out here: [@ipregion_bot](https://t.me/ipregion_bot).
 ```bash
 git clone https://github.com/Davoyan/ipregion_bot.git
 ```
-2. Add your tokens to the .env file:
+2. Create the .env file from the sample and add your tokens:
 
 ```bash
-cd ipregion_bot && nano .env
+cd ipregion_bot && cp .env.sample .env && nano .env
 ```
 
 3. Build the Docker image and start the container:
