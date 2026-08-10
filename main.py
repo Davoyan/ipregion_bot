@@ -138,6 +138,26 @@ def similar_enough(a: str, b: str, threshold: float = 0.9) -> bool:
     ratio = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
     return ratio >= threshold
     
+def loose_contains(a: str, b: str) -> bool:
+    if not a or not b:
+        return False
+    a_norm = a.strip().lower()
+    b_norm = b.strip().lower()
+    return a_norm in b_norm or b_norm in a_norm
+
+def geo_compatible(a_region, a_city, b_region, b_city) -> bool:
+    if not a_region and not a_city:
+        return True
+    if not b_region and not b_city:
+        return True
+
+    return (
+        loose_contains(a_region, b_region) or
+        loose_contains(a_city, b_city) or
+        loose_contains(a_region, b_city) or
+        loose_contains(a_city, b_region)
+    )
+
 def format_info(
     is_domain: bool,
     host: str,
@@ -233,186 +253,138 @@ def format_info(
     ipinfo_available = not ipi_error
     cloudflare_available = not cf_error and not cf_request_error
     
-    merged_all = False
-    try:
-        merged_all = all([
-            maxmind_available,
-            ipinfo_available,
-            cloudflare_available,
-            mm_country and ipi_country and cf_country and
-            mm_asn_number and ipi_asn_number and cf_asn_number and
-            mm_asn_org and ipi_asn_org and cf_asn_org and
-            
-            mm_country.strip().lower() == ipi_country.strip().lower() == cf_country.strip().lower(),           
-            mm_asn_number.strip().lower() == ipi_asn_number.strip().lower() == cf_asn_number.strip().lower(),
+    geo_sources = [
+        {
+            "key": "maxmind",
+            "title": "MaxMind",
+            "available": maxmind_available,
+            "country": mm_country,
+            "region": mm_region,
+            "city": mm_city,
+            "asn_number": mm_asn_number,
+            "asn_org": mm_asn_org,
+            "geo_rank": 1,
+        },
+        {
+            "key": "ipinfo",
+            "title": "IPinfo",
+            "available": ipinfo_available,
+            "country": ipi_country,
+            "region": ipi_region,
+            "city": ipi_city,
+            "asn_number": ipi_asn_number,
+            "asn_org": ipi_asn_org,
+            "geo_rank": 0,
+        },
+        {
+            "key": "cloudflare",
+            "title": "Cloudflare",
+            "available": cloudflare_available,
+            "country": cf_country,
+            "region": None,
+            "city": None,
+            "asn_number": cf_asn_number,
+            "asn_org": cf_asn_org,
+            "geo_rank": 2,
+        },
+    ]
 
-            similar_enough(mm_asn_org, ipi_asn_org) and
-            similar_enough(ipi_asn_org, cf_asn_org),
+    def can_merge(a: dict, b: dict) -> bool:
+        try:
+            if not (a["available"] and b["available"]):
+                return False
+            if not (a["country"] and b["country"]):
+                return False
+            if a["country"].strip().lower() != b["country"].strip().lower():
+                return False
+            if not (a["asn_number"] and b["asn_number"]):
+                return False
+            if str(a["asn_number"]).strip().lower() != str(b["asn_number"]).strip().lower():
+                return False
+            if not similar_enough(a["asn_org"] or "", b["asn_org"] or ""):
+                return False
+            return geo_compatible(a["region"], a["city"], b["region"], b["city"])
+        except Exception:
+            return False
 
-            (
-                (not mm_region and not mm_city) or
-                (not ipi_region and not ipi_city) or
-                ((mm_region or mm_city) and (ipi_region or ipi_city) and (
-                    (mm_region and ipi_region and (mm_region.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_region.strip().lower())) or
-                    (mm_city and ipi_city and (mm_city.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_city.strip().lower())) or
-                    (mm_region and ipi_city and (mm_region.strip().lower() in ipi_city.strip().lower() or ipi_city.strip().lower() in mm_region.strip().lower())) or
-                    (mm_city and ipi_region and (mm_city.strip().lower() in ipi_region.strip().lower() or ipi_region.strip().lower() in mm_city.strip().lower()))
-                ))
-            )
-        ])
-    except Exception:
-        merged_all = False
-   
+    groups = []
+    grouped = set()
+    for i, source in enumerate(geo_sources):
+        if i in grouped:
+            continue
+        group = [source]
+        grouped.add(i)
+        for j in range(i + 1, len(geo_sources)):
+            if j in grouped:
+                continue
+            if all(can_merge(member, geo_sources[j]) for member in group):
+                group.append(geo_sources[j])
+                grouped.add(j)
+        groups.append(group)
+
     cloudflare_proceed = False
-    
-    if merged_all:
-        # --- MaxMind & IPinfo & Cloudflare ---
-        lines.append("")
-        lines.append("▢  <b>MaxMind</b> & <b>IPinfo</b> & <b>Cloudflare:</b>")
 
-        country_flag = get_country_flag(mm_country.strip())
-        country_name = get_country_name(mm_country)
-        line = f"{country_flag}{mm_country} {country_name}"
-
-        region = ipi_region or mm_region
-        city = ipi_city or mm_city
-
-        if region:
-            line += f", {region}"
-        if city and not similar_enough(city, region):
-            line += f", {city}"
-
-        lines.append(line)
-
-        org = None
-        if mm_asn_org or ipi_asn_org:
-            if len(mm_asn_org or "") >= len(ipi_asn_org or ""):
-                org = mm_asn_org
-            else:
-                org = ipi_asn_org
-
-        asn_line = mm_asn_number
-        if org:
-            asn_line += f" / {org}"
-        lines.append(asn_line)
-
-        cloudflare_proceed = True
-    else:
-        # --- MaxMind ---
-        if maxmind_available:
-            lines.append("")
-            lines.append(f"▢  <b>MaxMind:</b>")
-            if mm_country:
-                country_flag = get_country_flag(mm_country.strip())
-                country_name = get_country_name(mm_country)
-                line = f"{country_flag}{mm_country} {country_name}"
-                if mm_region:
-                    line += f", {mm_region}"
-                if mm_city and (not similar_enough(mm_city, mm_region)):
-                    line += f", {mm_city}"
-                lines.append(line)
-            else:
-                country_flag = "🏳"
-                line = f"{country_flag} Region not specified"
-                lines.append(line)
-            if mm_asn_number:
-                asn_line = f"{mm_asn_number}"
-                if mm_asn_org:
-                    asn_line += f" / {mm_asn_org}"
-                lines.append(asn_line)  
-        
-        merged = (
-            ipinfo_available and cloudflare_available and
-            (ipi_country or "").strip().lower() == (cf_country or "").strip().lower() and
-            (ipi_asn_number or "").strip().lower() == (cf_asn_number or "").strip().lower() and
-            similar_enough(ipi_asn_org or "", cf_asn_org or "")
-        )
-        
-        # --- IPinfo AND Cloudflare ---
-        if merged:
-            cloudflare_proceed = True
-            lines.append("")
-            lines.append("▢  <b>IPinfo</b> & <b>Cloudflare:</b>")
-            
-            cf_country
-            
-            if ipi_country:
-                country_flag = get_country_flag(ipi_country.strip())
-                country_name = get_country_name(ipi_country)
-                line = f"{country_flag}{ipi_country} {country_name}"
-                if ipi_region:
-                    line += f", {ipi_region}"
-                if ipi_city and (not similar_enough(ipi_city, ipi_region)):
-                    line += f", {ipi_city}"
-                lines.append(line)
-                
-            if ipi_asn_number:
-                asn_line = f"{ipi_asn_number}"
-                org = None
-                if ipi_asn_org or cf_asn_org:
-                    if len(ipi_asn_org or "") >= len(cf_asn_org or ""):
-                        org = ipi_asn_org
-                    else:
-                        org = cf_asn_org
-                asn_line = f"{ipi_asn_number}"
-                if org:
-                    asn_line += f" / {org}"
-                lines.append(asn_line)
-        else:
-        # --- IPinfo ---
-            if not ipi_error:
-                lines.append("")
-                lines.append(f"▢  <b>IPinfo:</b>")
-                if ipi_country:
-                    country_flag = get_country_flag(ipi_country.strip())
-                    country_name = get_country_name(ipi_country)
-                    line = f"{country_flag}{ipi_country}"
-                    if ipi_country.strip().upper() != country_name.strip().upper():
-                        line += f" {country_name}"
-                    if ipi_region:
-                        line += f", {ipi_region}"
-                    if ipi_city and (not similar_enough(ipi_city, ipi_region)):
-                        line += f", {ipi_city}"
-                    lines.append(line)
-                if ipi_asn_number:
-                    asn_line = f"{ipi_asn_number}"
-                    if ipi_asn_org:
-                        asn_line += f" / {ipi_asn_org}"
-                    lines.append(asn_line)
-            else:
+    for group in groups:
+        if not group[0]["available"]:
+            key = group[0]["key"]
+            if key == "ipinfo":
                 if str(ipi_error) == "HTTP 429":
                     lines.append("")
-                    lines.append(f"▢  <b>Ipinfo:</b>")
+                    lines.append(f"▢ <b>Ipinfo:</b>")
                     lines.append(f"⚠️ Ipinfo error (429)")
                 else:
                     lines.append("")
                     lines.append(f"⚠️ Ipinfo error")
-            
-            # --- Cloudflare ---
-            if not cf_error and not cf_request_error:
-                cloudflare_proceed = True
-                lines.append("")
-                lines.append(f"▢  <b>Cloudflare:</b>")
-                if cf_country:
-                    country_flag = get_country_flag(cf_country.strip())
-                    country_name = get_country_name(cf_country)
-                    line = f"{country_flag}{cf_country}"
-                    if cf_country.strip().upper() != country_name.strip().upper():
-                        line += f" {country_name}"
-                    lines.append(line)
-                if cf_asn_number:
-                    asn_line = f"{cf_asn_number}"
-                    if cf_asn_org:
-                        asn_line += f" / {cf_asn_org}"
-                    lines.append(asn_line)
-            else:
+            elif key == "cloudflare":
                 if str(cf_request_error or cf_error) == "HTTP 429":
                     lines.append("")
-                    lines.append(f"▢  <b>Cloudflare:</b>")
+                    lines.append(f"▢ <b>Cloudflare:</b>")
                     lines.append(f"⚠️ Cloudflare error (429)")
                 else:
                     lines.append("")
                     lines.append(f"⚠️ Cloudflare error")
+            continue
+
+        if any(member["key"] == "cloudflare" for member in group):
+            cloudflare_proceed = True
+
+        titles = [member["title"] for member in group]
+        titles[-1] = f"{titles[-1]}:"
+
+        lines.append("")
+        lines.append("▢ " + " & ".join(f"<b>{title}</b>" for title in titles))
+
+        country = next((member["country"] for member in group if member["country"]), None)
+        if country:
+            country_flag = get_country_flag(country.strip())
+            country_name = get_country_name(country)
+            line = f"{country_flag}{country}"
+            if country.strip().upper() != str(country_name).strip().upper():
+                line += f" {country_name}"
+
+            by_geo_rank = sorted(group, key=lambda member: member["geo_rank"])
+            region = next((member["region"] for member in by_geo_rank if member["region"]), None)
+            city = next((member["city"] for member in by_geo_rank if member["city"]), None)
+
+            if region:
+                line += f", {region}"
+            if city and (not similar_enough(city, region)):
+                line += f", {city}"
+            lines.append(line)
+        elif group[0]["key"] == "maxmind":
+            lines.append(f"🏳 No geo data")
+
+        asn_number = next((member["asn_number"] for member in group if member["asn_number"]), None)
+        if asn_number:
+            asn_org = max(
+                (member["asn_org"] for member in group if member["asn_org"]),
+                key=len,
+                default=None
+            )
+            asn_line = f"{asn_number}"
+            if asn_org:
+                asn_line += f" / {asn_org}"
+            lines.append(asn_line)
 
     # RADP
     radp_as = radp.get("as")
@@ -441,7 +413,7 @@ def format_info(
             rdap_link_base = RIR_RDAP_BASE.get(source.lower(), "#")
             
             lines.append("")
-            lines.append(f"▢  <b>Registration</b> ({source.upper()})<b>:</b>")                        
+            lines.append(f"▢ <b>Registration</b> ({source.upper()})<b>:</b>")                        
                        
             radp_error = radp.get("error") 
             if not radp_error:
@@ -482,7 +454,7 @@ def format_info(
     if "security" in ipregistry:
         ipregistry_proceeded = True
         lines.append("")
-        lines.append("▢  <b>Privacy info</b> (ipregistry<b>․</b>co)<b>:</b>")
+        lines.append("▢ <b>Privacy info</b> (ipregistry<b>․</b>co)<b>:</b>")
 
         security = ipregistry["security"]
 
@@ -504,7 +476,7 @@ def format_info(
         
     if ipqs and "error" not in ipqs:
         lines.append("")
-        lines.append("▢  <b>Privacy info</b> (IPQS)<b>:</b>")                
+        lines.append("▢ <b>Privacy info</b> (IPQS)<b>:</b>")                
             
         checks = {
             "Proxy": ipqs.get("vpn") or ipqs.get("active_vpn") or ipqs.get("tor") or ipqs.get("active_tor") or ipqs.get("proxy"),
