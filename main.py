@@ -307,6 +307,19 @@ def format_info(
         except Exception:
             return False
 
+    by_key = {source["key"]: source for source in geo_sources}
+
+    cloudflare_to_ipinfo = (
+        can_merge(by_key["cloudflare"], by_key["ipinfo"])
+        and can_merge(by_key["cloudflare"], by_key["maxmind"])
+        and not can_merge(by_key["maxmind"], by_key["ipinfo"])
+    )
+
+    def can_pair(a: dict, b: dict) -> bool:
+        if cloudflare_to_ipinfo and {a["key"], b["key"]} == {"maxmind", "cloudflare"}:
+            return False
+        return can_merge(a, b)
+
     groups = []
     grouped = set()
     for i, source in enumerate(geo_sources):
@@ -317,7 +330,7 @@ def format_info(
         for j in range(i + 1, len(geo_sources)):
             if j in grouped:
                 continue
-            if all(can_merge(member, geo_sources[j]) for member in group):
+            if all(can_pair(member, geo_sources[j]) for member in group):
                 group.append(geo_sources[j])
                 grouped.add(j)
         groups.append(group)
